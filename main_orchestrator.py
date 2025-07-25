@@ -6,12 +6,10 @@ import os
 
 # Importar funciones de los otros scripts
 from scraper_completo import scrape_store_for_families
-from procesador_ofertas import get_top_deals_from_all_products, send_deals_to_slack
-from notificador_slack import send_slack_notification
+from procesador_ofertas import process_and_send_all_deals
 
 # Archivos de configuración y estado
 STORES_FILE = "stores.json"
-TOP_DEALS_FILE = "top_deals_history.json"
 # Horario de ejecución (en horas, formato 24h)
 START_HOUR = 7  # 7 AM
 END_HOUR = 20   # 8 PM
@@ -49,9 +47,6 @@ def main_orchestrator():
         if START_HOUR <= now.hour < END_HOUR:
             print(f"Ejecutando proceso a las {now.strftime('%H:%M:%S')}")
             
-            # Cargar ofertas de la ejecución anterior
-            previous_top_deals = load_json_file(TOP_DEALS_FILE) or []
-
             all_scraped_products = []
             for id_sucursal, nombre_sucursal in stores_data.items():
                 print(f"Procesando tienda: {nombre_sucursal} (ID: {id_sucursal})")
@@ -62,22 +57,11 @@ def main_orchestrator():
             
             print(f"\n--- Scraping completado para todas las tiendas. Total de productos: {len(all_scraped_products)} ---")
 
-            # Paso 2: Procesar y obtener las mejores ofertas
-            current_top_deals = []
+            # Paso 2: Procesar y enviar ofertas a Slack
             if all_scraped_products:
-                current_top_deals = get_top_deals_from_all_products(all_scraped_products)
-            
-            print(f"DEBUG: previous_top_deals: {previous_top_deals}")
-            print(f"DEBUG: current_top_deals: {current_top_deals}")
-
-            # Comparar ofertas actuales con las anteriores
-            if current_top_deals == previous_top_deals:
-                print("No se encontraron cambios en las mejores ofertas desde la última ejecución.")
-                send_slack_notification("No se encontraron cambios en las mejores ofertas desde la última ejecución.")
+                process_and_send_all_deals(all_scraped_products)
             else:
-                print("Se encontraron cambios en las mejores ofertas. Enviando notificaciones...")
-                save_json_file(TOP_DEALS_FILE, current_top_deals)
-                send_deals_to_slack(current_top_deals)
+                print(f"No se encontraron datos en ninguna tienda. Saltando procesamiento de ofertas.")
             
             # Esperar hasta el siguiente ciclo de ejecución (por ejemplo, 1 hora)
             print(f"Proceso completado para hoy. Esperando 1 hora para el próximo ciclo.")
