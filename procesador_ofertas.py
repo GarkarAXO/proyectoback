@@ -1,6 +1,14 @@
 import datetime
 import time
 import re
+import openai
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
 from servicio_pse import clean_price_str
 from notificador_slack import send_slack_notification, format_slack_message
 
@@ -9,6 +17,38 @@ END_SEND_HOUR = 20
 
 MIN_UNITS_FOR_MARGIN_CALCULATION = 3 # Mínimo de unidades del mismo modelo para calcular margen
 MIN_PROFIT_THRESHOLD = 100.0 # Margen mínimo en MXN para considerar una oferta
+
+def analyze_offer_with_openai(product_data, comparison_data):
+    prompt = f"""
+Analiza la siguiente oferta de un producto de Efectimundo y determina si 'vale la pena' comprarlo para reventa, basándote en los datos proporcionados. Sé conciso y responde solo 'Sí', 'No' o 'Podría ser', seguido de una breve justificación (máximo 20 palabras).
+
+Datos de la oferta:
+Producto: {product_data['Marca']} {product_data['Modelo']}
+Precio en Efectimundo: {product_data['Precio Venta']}
+Margen calculado: {comparison_data['margen']}
+Mayor precio en Efectimundo (modelo): ${comparison_data['mayor_precio_efectimundo']:,.2f}
+Menor precio en Efectimundo (modelo): ${comparison_data['menor_precio_efectimundo']:,.2f}
+
+¿Vale la pena esta oferta para reventa?
+"""
+
+    try:
+        if not openai.api_key:
+            raise ValueError("OPENAI_API_KEY no configurada.")
+
+        response = openai.completions.create(
+            model="gpt-3.5-turbo-instruct", # O el modelo que prefieras para completions
+            prompt=prompt,
+            max_tokens=50,
+            temperature=0.5
+        )
+        return response.choices[0].text.strip()
+    except ValueError as ve:
+        print(f"Advertencia: {ve}. No se realizará el análisis de IA.")
+        return "Análisis de IA no disponible (API Key no configurada)"
+    except Exception as e:
+        print(f"Error al llamar a OpenAI: {e}")
+        return "Análisis de IA no disponible (Error de IA)"
 
 def process_and_send_all_deals(all_scraped_products):
     print(f"\n--- Procesando y enviando ofertas de todas las tiendas ---")
@@ -176,6 +216,10 @@ def process_and_send_all_deals(all_scraped_products):
             'menor_precio_efectimundo': menor_precio_efectimundo,
             'product_id': product_id
         }
+
+        # Analizar la oferta con OpenAI
+        openai_analysis = analyze_offer_with_openai(product, comparison_data)
+        comparison_data['openai_analysis'] = openai_analysis
 
         message = format_slack_message(product, comparison_data)
         send_slack_notification(message)

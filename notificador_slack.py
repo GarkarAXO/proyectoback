@@ -51,4 +51,6 @@ Estimación de Precios de Mercado (MXN):
 :moneybag: Mayor precio en Efectimundo (modelo): ${comparison_data['mayor_precio_efectimundo']:,.2f}
 :moneybag: Menor precio en Efectimundo (modelo): ${comparison_data['menor_precio_efectimundo']:,.2f}
 💵 *Margen aproximado: {comparison_data['margen']}*
+
+🤖 *Análisis de IA: {comparison_data['openai_analysis']}*
 """
