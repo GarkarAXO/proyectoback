@@ -42,11 +42,13 @@ def format_slack_message(product_data, comparison_data):
     return f"""
 :iphone: *¡Oferta de {product_data['Marca']} {product_data['Modelo']} encontrada!*
 Producto: {product_data['Marca']} {product_data['Modelo']}
+Modelo: {product_data['Modelo']}
 Sucursal: {product_data['Tienda']}
 Descripción: {product_data['Descripción']}
+Prenda/Lote: {comparison_data['product_id']}
 Estimación de Precios de Mercado (MXN):
 🌎 *Precio en Efectimundo: {product_data['Precio Venta']}*
-♻️ Precio Reacondicionados (Estimado): {comparison_data['reacondicionados']}
-🆕 Precio de Nuevos (Estimado): {comparison_data['nuevos']}
+:moneybag: Mayor precio en Efectimundo (modelo): ${comparison_data['mayor_precio_efectimundo']:,.2f}
+:moneybag: Menor precio en Efectimundo (modelo): ${comparison_data['menor_precio_efectimundo']:,.2f}
 💵 *Margen aproximado: {comparison_data['margen']}*
 """

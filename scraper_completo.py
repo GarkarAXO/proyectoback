@@ -75,11 +75,10 @@ def fetch_page_data(page_number, familia, id_sucursal):
             parsed_json = json.loads(response_content)
             return parsed_json
     except urllib.error.URLError as e:
-        print(f"DEBUG: Error de URL para {familia} en sucursal {id_sucursal}, página {page_number}: {e}", flush=True)
+        print(f"Error de URL para {familia} en sucursal {id_sucursal}, página {page_number}: {e}", flush=True)
         return None
     except json.JSONDecodeError as e:
-        print(f"DEBUG: Error de JSON para {familia} en sucursal {id_sucursal}, página {page_number}: {e}", flush=True)
-        # print(f"DEBUG: Contenido que causó el error JSON (primeros 500 chars): {response_content[:500]}...", flush=True)
+        print(f"Error de JSON para {familia} en sucursal {id_sucursal}, página {page_number}: {e}. Contenido: {response_content[:500]}...", flush=True)
         return None
 
 def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
@@ -94,7 +93,7 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
             initial_data = fetch_page_data(1, familia, id_sucursal)
             
             if not initial_data or not initial_data.get('tabla'):
-                print(f"    DEBUG: No se encontraron datos o tabla para {familia} en {nombre_sucursal}. Saltando.")
+                print(f"    No se encontraron datos o tabla para {familia} en {nombre_sucursal}. Saltando.")
                 continue
 
             total_pages = int(initial_data.get('pag_final', 1))
@@ -108,6 +107,7 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
             parser.feed(initial_data['tabla'])
             if not headers and parser.headers:
                 headers = parser.headers
+                
             all_rows.extend(parser.rows)
 
             for page_num in range(2, total_pages_calculadas + 1):
@@ -122,8 +122,8 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
             print(f"  - {nombre_sucursal} ({familia}): Total de registros obtenidos: {len(all_rows)}.")
 
             # Convertir filas a diccionarios y añadir a la lista consolidada
-            for row in all_rows:
-                product_dict = {headers[i]: item for i, item in enumerate(row)}
+            for i, row in enumerate(all_rows):
+                product_dict = {headers[j]: item for j, item in enumerate(row)}
                 product_dict['Tienda'] = nombre_sucursal
                 product_dict['ID_Sucursal'] = id_sucursal
                 all_products_from_store.append(product_dict)
@@ -134,4 +134,3 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
     total_items_scraped_for_store = len(all_products_from_store)
     print(f"\n--- Resumen para {nombre_sucursal} ({id_sucursal}): Total de artículos encontrados: {total_items_scraped_for_store} ---")
     return all_products_from_store
-
