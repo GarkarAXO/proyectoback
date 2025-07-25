@@ -67,6 +67,9 @@ def main_orchestrator():
             if all_scraped_products:
                 current_top_deals = get_top_deals_from_all_products(all_scraped_products)
             
+            print(f"DEBUG: previous_top_deals: {previous_top_deals}")
+            print(f"DEBUG: current_top_deals: {current_top_deals}")
+
             # Comparar ofertas actuales con las anteriores
             if current_top_deals == previous_top_deals:
                 print("No se encontraron cambios en las mejores ofertas desde la última ejecución.")
