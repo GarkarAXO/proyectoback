@@ -36,19 +36,23 @@ Menor precio en Efectimundo (modelo): ${comparison_data['menor_precio_efectimund
         if not openai.api_key:
             raise ValueError("OPENAI_API_KEY no configurada.")
 
-        response = openai.completions.create(
-            model="gpt-3.5-turbo-instruct", # O el modelo que prefieras para completions
-            prompt=prompt,
+        response = openai.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Eres un asistente experto en análisis de oportunidades de reventa."},
+                {"role": "user", "content": prompt}
+            ],
             max_tokens=50,
             temperature=0.5
         )
-        return response.choices[0].text.strip()
+        return response.choices[0].message.content.strip()
     except ValueError as ve:
         print(f"Advertencia: {ve}. No se realizará el análisis de IA.")
         return "Análisis de IA no disponible (API Key no configurada)"
     except Exception as e:
         print(f"Error al llamar a OpenAI: {e}")
         return "Análisis de IA no disponible (Error de IA)"
+
 
 def process_and_send_all_deals(all_scraped_products):
     print(f"\n--- Procesando y enviando ofertas de todas las tiendas ---")

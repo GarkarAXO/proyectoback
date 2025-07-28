@@ -19,9 +19,9 @@ def obtener_imagenes_efectimundo(sku):
 
         if data.get("estatus") and "listaImagenes" in data:
             return [
-                "https://efectimundo.com.mx/catalogo" + ruta.lstrip(".")
-                for ruta in data["listaImagenes"]
-                if isinstance(ruta, str)
+                "https://efectimundo.com.mx/catalogo" + img.get("href", "").lstrip(".")
+                for img in data["listaImagenes"]
+                if isinstance(img, dict) and "href" in img
             ]
     except Exception as e:
         print(f"Error al obtener imagen para SKU {sku}: {e}")
@@ -147,8 +147,11 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
             # Convertir filas a diccionarios y añadir a la lista consolidada
             for i, row in enumerate(all_rows):
                 product_dict = {headers[j]: item for j, item in enumerate(row)}
+                
                 product_dict['Tienda'] = nombre_sucursal
                 product_dict['ID_Sucursal'] = id_sucursal
+                sku = product_dict.get("Prenda / Sku Lote", "")
+                product_dict["Imagenes"] = obtener_imagenes_efectimundo(sku)
                 all_products_from_store.append(product_dict)
 
         except Exception as e:
