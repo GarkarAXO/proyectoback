@@ -1,4 +1,4 @@
 python-dotenv
 Flask
 openai
-echo "requests" 
+requests 
