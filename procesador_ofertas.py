@@ -52,6 +52,7 @@ Menor precio en Efectimundo (modelo): ${comparison_data['menor_precio_efectimund
 
 def process_and_send_all_deals(all_scraped_products):
     print(f"\n--- Procesando y enviando ofertas de todas las tiendas ---")
+    print(f"DEBUG: all_scraped_products recibido: {len(all_scraped_products)} items.")
 
     interest_keywords = {
         'CONSOLAS DE JUEGOS': [
@@ -110,6 +111,7 @@ def process_and_send_all_deals(all_scraped_products):
                 if keyword in search_text:
                     filtered_deals.append(product_dict)
                     break
+    print(f"DEBUG: filtered_deals (después de filtros): {len(filtered_deals)} items.")
 
     if not filtered_deals:
         print(f"No se encontraron ofertas de interés en ninguna tienda.")
@@ -122,6 +124,7 @@ def process_and_send_all_deals(all_scraped_products):
         if model_key not in deals_by_model_for_margin:
             deals_by_model_for_margin[model_key] = []
         deals_by_model_for_margin[model_key].append(deal)
+    print(f"DEBUG: deals_by_model_for_margin (agrupados por modelo): {len(deals_by_model_for_margin)} modelos.")
 
     # Calcular el margen para cada oferta y seleccionar las mejores
     final_deals_to_send = []
@@ -151,7 +154,8 @@ def process_and_send_all_deals(all_scraped_products):
             # Solo añadir la oferta si el margen calculado es significativo
             if margen_calculado >= MIN_PROFIT_THRESHOLD:
                 current_deal['MargenCalculado'] = margen_calculado
-                final_deals_to_send.append(current_deal)
+            final_deals_to_send.append(current_deal)
+    print(f"DEBUG: final_deals_to_send (con margen calculado): {len(final_deals_to_send)} items.")
 
     # Seleccionar los 3 mejores de cada modelo (ahora con margen calculado)
     # Primero, agrupar por modelo nuevamente, pero ahora con el margen calculado
@@ -164,9 +168,25 @@ def process_and_send_all_deals(all_scraped_products):
 
     top_deals = []
     for model_key, deals_list in deals_by_model_for_top_selection.items():
+        print(f"DEBUG: Inspecting deals_list for model {model_key} before sort (length: {len(deals_list)}):")
+        for item_in_list in deals_list:
+            print(f"DEBUG:   Item keys: {item_in_list.keys()}")
+            if 'MargenCalculado' not in item_in_list:
+                print(f"DEBUG:   !!! PROBLEM: Item is missing 'MargenCalculado' !!!: {item_in_list}")
         # Ordenar por margen (mayor a menor) y luego por precio (menor a mayor)
-        deals_list.sort(key=lambda p: (p['MargenCalculado'], -clean_price_str(p.get('Precio Venta', '0'))), reverse=True)
-        top_deals.extend(deals_list[:3])
+       # Filtrar solo los productos que tienen MargenCalculado
+        deals_with_margin = [p for p in deals_list if 'MargenCalculado' in p]
+        if not deals_with_margin:
+            print(f"DEBUG:   No deals with MargenCalculado for model {model_key}. Skipping.")
+            continue
+
+        # Ordenar por margen (mayor a menor) y luego por precio (menor a mayor)
+        deals_with_margin.sort(
+            key=lambda p: (p['MargenCalculado'], -clean_price_str(p.get('Precio Venta', '0'))),
+            reverse=True
+        )
+        top_deals.extend(deals_with_margin[:3])
+    print(f"DEBUG: top_deals (final antes de retornar): {len(top_deals)} items.")
     print(f"DEBUG: top_deals (final antes de retornar): {len(top_deals)} items.")
 
     if not top_deals:

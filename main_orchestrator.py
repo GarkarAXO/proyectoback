@@ -21,8 +21,8 @@ def load_json_file(filename):
     except FileNotFoundError:
         print(f"Error: Archivo {filename} no encontrado.")
         return None
-    except json.JSONDecodeError:
-        print(f"Error: Archivo {filename} no es un JSON válido.")
+    except json.JSONDecodeError as e:
+        print(f"Error: Archivo {filename} no es un JSON válido. Detalles: {e}")
         return None
 
 def save_json_file(filename, data):

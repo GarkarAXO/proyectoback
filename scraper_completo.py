@@ -4,6 +4,29 @@ import urllib.request
 import urllib.parse
 from html.parser import HTMLParser
 import os
+import requests
+
+def obtener_imagenes_efectimundo(sku):
+    url = "https://efectimundo.com.mx/catalogo/consulta_catalogo.php"
+    params = {
+        "metodo": "guardayMuestaImagenes",
+        "prenda": sku
+    }
+
+    try:
+        response = requests.post(url, params=params, timeout=5)
+        data = response.json()
+
+        if data.get("estatus") and "listaImagenes" in data:
+            return [
+                "https://efectimundo.com.mx/catalogo" + ruta.lstrip(".")
+                for ruta in data["listaImagenes"]
+                if isinstance(ruta, str)
+            ]
+    except Exception as e:
+        print(f"Error al obtener imagen para SKU {sku}: {e}")
+
+    return []
 
 class TableParser(HTMLParser):
     def __init__(self):
