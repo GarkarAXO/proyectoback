@@ -49,9 +49,8 @@ def format_slack_message(product, comparison_data):
 *Sucursal:* {product['Tienda']}
 *Descripción:* {product['Descripción']}
 *Prenda/Lote:* {comparison_data['product_id']}
-:moneybag: *Precio en Efectimundo:* {product['Precio Venta']}
-:moneybag: Mayor precio (modelo): ${comparison_data['mayor_precio_efectimundo']:,.2f}
-:moneybag: Menor precio (modelo): ${comparison_data['menor_precio_efectimundo']:,.2f}
+:moneybag: *Precio de sucursal:* {product['Precio Promoción']}
+:moneybag: Precio dominante (modelo): ${comparison_data['precio_dominante']:,.2f}
 💵 *Margen estimado:* {comparison_data['margen']}"""
         }
     })
