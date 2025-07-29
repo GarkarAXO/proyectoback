@@ -1,3 +1,4 @@
+
 import json
 import csv
 import urllib.request
@@ -5,6 +6,29 @@ import urllib.parse
 from html.parser import HTMLParser
 import os
 import requests
+
+# Sistema de caché simple en JSON
+CACHE_FILE = "imagenes_cache.json"
+
+def load_image_cache():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_image_cache(cache):
+    with open(CACHE_FILE, "w", encoding="utf-8") as f:
+        json.dump(cache, f)
+
+def is_sku_cached(sku):
+    return sku in image_cache
+
+def load_cached_sku(sku):
+    return image_cache.get(sku, [])
+
+def cache_sku(sku, image_urls):
+    image_cache[sku] = image_urls
+    save_image_cache(image_cache)
 
 def obtener_imagenes_efectimundo(sku):
     url = "https://efectimundo.com.mx/catalogo/consulta_catalogo.php"
@@ -19,9 +43,9 @@ def obtener_imagenes_efectimundo(sku):
 
         if data.get("estatus") and "listaImagenes" in data:
             return [
-                "https://efectimundo.com.mx/catalogo" + img.get("href", "").lstrip(".")
-                for img in data["listaImagenes"]
-                if isinstance(img, dict) and "href" in img
+                "https://efectimundo.com.mx/catalogo" + ruta["href"].lstrip(".")
+                for ruta in data["listaImagenes"]
+                if isinstance(ruta, dict) and "href" in ruta
             ]
     except Exception as e:
         print(f"Error al obtener imagen para SKU {sku}: {e}")
@@ -80,15 +104,8 @@ def fetch_page_data(page_number, familia, id_sucursal):
         'Origin': 'https://efectimundo.com.mx',
         'Pragma': 'no-cache',
         'Referer': 'https://efectimundo.com.mx/catalogo/catalogo.php',
-        'Sec-Fetch-Dest': 'empty',
-        'Sec-Fetch-Mode': 'cors',
-        'Sec-Fetch-Site': 'same-origin',
-        'Sec-GPC': '1',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36',
-        'X-Requested-With': 'XMLHttpRequest',
-        'sec-ch-ua': '"Not)A;Brand";v="8", "Chromium";v="138", "Brave";v="138"',
-        'sec-ch-ua-mobile': '?0',
-        'sec-ch-ua-platform': '"macOS"'
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)',
+        'X-Requested-With': 'XMLHttpRequest'
     }
     data = urllib.parse.urlencode({'pagina': page_number}).encode('utf-8')
     req = urllib.request.Request(url, data=data, headers=headers)
@@ -97,11 +114,8 @@ def fetch_page_data(page_number, familia, id_sucursal):
             response_content = response.read().decode('utf-8')
             parsed_json = json.loads(response_content)
             return parsed_json
-    except urllib.error.URLError as e:
-        print(f"Error de URL para {familia} en sucursal {id_sucursal}, página {page_number}: {e}", flush=True)
-        return None
-    except json.JSONDecodeError as e:
-        print(f"Error de JSON para {familia} en sucursal {id_sucursal}, página {page_number}: {e}. Contenido: {response_content[:500]}...", flush=True)
+    except Exception as e:
+        print(f"Error al obtener página {page_number} de {familia} en sucursal {id_sucursal}: {e}")
         return None
 
 def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
@@ -110,53 +124,54 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
         all_rows = []
         headers = []
 
-        print(f"\n--- Procesando Familia: {familia} en {nombre_sucursal} ({id_sucursal}) ---")
+        print(f"Procesando {familia} en {nombre_sucursal} ({id_sucursal})")
 
         try:
             initial_data = fetch_page_data(1, familia, id_sucursal)
-            
             if not initial_data or not initial_data.get('tabla'):
-                print(f"    No se encontraron datos o tabla para {familia} en {nombre_sucursal}. Saltando.")
+                print(f"No hay datos para {familia} en {nombre_sucursal}.")
                 continue
 
             total_pages = int(initial_data.get('pag_final', 1))
-            total_registros_esperados = int(initial_data.get('rowCount', 0))
             page_size = 50
-            total_pages_calculadas = (total_registros_esperados + page_size - 1) // page_size
-            
-            print(f"  - {nombre_sucursal} ({familia}): Se esperan {total_registros_esperados} items. Calculadas {total_pages_calculadas} páginas.")
+            total_items = int(initial_data.get('rowCount', 0))
+            pages = (total_items + page_size - 1) // page_size
 
             parser = TableParser()
             parser.feed(initial_data['tabla'])
-            if not headers and parser.headers:
-                headers = parser.headers
-                
+            headers = parser.headers
             all_rows.extend(parser.rows)
 
-            for page_num in range(2, total_pages_calculadas + 1):
-                page_data = fetch_page_data(page_num, familia, id_sucursal)
-                if page_data and page_data.get('tabla'):
+            for page_num in range(2, pages + 1):
+                data = fetch_page_data(page_num, familia, id_sucursal)
+                if data and data.get("tabla"):
                     parser = TableParser()
-                    parser.feed(page_data['tabla'])
+                    parser.feed(data["tabla"])
                     all_rows.extend(parser.rows)
-                else:
-                    print(f"    Advertencia: No se obtuvo tabla para {familia} en {nombre_sucursal}, página {page_num}. Posible fin de datos o error.")
-            
-            print(f"  - {nombre_sucursal} ({familia}): Total de registros obtenidos: {len(all_rows)}.")
 
-            # Convertir filas a diccionarios y añadir a la lista consolidada
-            for i, row in enumerate(all_rows):
+            for row in all_rows:
                 product_dict = {headers[j]: item for j, item in enumerate(row)}
-                
-                product_dict['Tienda'] = nombre_sucursal
-                product_dict['ID_Sucursal'] = id_sucursal
+                descripcion = product_dict.get("Descripción", "").lower()
+                tipo = product_dict.get("Tipo", "").lower()
+                if "dañado" in descripcion or "dañado" in tipo:
+                    continue
+
                 sku = product_dict.get("Prenda / Sku Lote", "")
-                product_dict["Imagenes"] = obtener_imagenes_efectimundo(sku)
+                if is_sku_cached(sku):
+                    imagenes = load_cached_sku(sku)
+                else:
+                    imagenes = obtener_imagenes_efectimundo(sku)
+                    cache_sku(sku, imagenes)
+                product_dict["Imagenes"] = imagenes
+
+                product_dict["Tienda"] = nombre_sucursal
+                product_dict["ID_Sucursal"] = id_sucursal
                 all_products_from_store.append(product_dict)
 
         except Exception as e:
-            print(f"    Ocurrió un error inesperado en {nombre_sucursal}: {e}")
+            print(f"Error al procesar {familia} en {nombre_sucursal}: {e}")
 
-    total_items_scraped_for_store = len(all_products_from_store)
-    print(f"\n--- Resumen para {nombre_sucursal} ({id_sucursal}): Total de artículos encontrados: {total_items_scraped_for_store} ---")
     return all_products_from_store
+
+# Inicializar caché global
+image_cache = load_image_cache()
