@@ -2,6 +2,7 @@ import datetime
 import time
 import re
 import os
+import json
 from collections import Counter
 from dotenv import load_dotenv
 
@@ -10,12 +11,15 @@ load_dotenv()
 from servicio_pse import clean_price_str
 from notificador_slack import send_slack_notification, format_slack_message
 from openai import OpenAI
+from scraper_completo import obtener_imagenes_efectimundo
+
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 START_SEND_HOUR = 7
 END_SEND_HOUR = 20
 MIN_DOMINANT_FREQ = 3
 MIN_PROFIT_THRESHOLD = 100.0
+IMAGENES_CACHE_FILE = "imagenes_cache.json"
 
 def analyze_offer_with_openai(product_data, comparison_data):
     prompt = f"""
@@ -86,7 +90,14 @@ def process_and_send_all_deals(all_scraped_products):
         return
 
     tiempo_restante = (end_of_day - now).total_seconds()
-    intervalo_envio = max(240, tiempo_restante / len(final_deals_to_send))
+    intervalo_envio = 180  # 3 minutos fijos entre envíos
+
+    # Cargar caché si existe
+    if os.path.exists(IMAGENES_CACHE_FILE):
+        with open(IMAGENES_CACHE_FILE, "r") as f:
+            imagenes_cache = json.load(f)
+    else:
+        imagenes_cache = {}
 
     for i, producto in enumerate(final_deals_to_send):
         print(f"Enviando {i+1}/{len(final_deals_to_send)}: {producto.get('Marca')} {producto.get('Modelo')}")
@@ -100,6 +111,14 @@ def process_and_send_all_deals(all_scraped_products):
 
         product_id = producto.get("Prenda / Sku Lote", "N/A")
         margen = producto.get("MargenCalculado", 0)
+
+        # Buscar imágenes si no están en caché
+        if product_id in imagenes_cache:
+            producto["Imagenes"] = imagenes_cache[product_id]
+        else:
+            imagenes = obtener_imagenes_efectimundo(product_id)
+            imagenes_cache[product_id] = imagenes
+            producto["Imagenes"] = imagenes
 
         comparison_data = {
             "precio_dominante": precio_dominante,
@@ -115,5 +134,9 @@ def process_and_send_all_deals(all_scraped_products):
 
         if i < len(final_deals_to_send) - 1:
             time.sleep(intervalo_envio)
+
+    # Guardar caché actualizado al final
+    with open(IMAGENES_CACHE_FILE, "w") as f:
+        json.dump(imagenes_cache, f, indent=2)
 
     print("Proceso completado.")

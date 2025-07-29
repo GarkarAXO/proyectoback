@@ -38,7 +38,9 @@ def main_orchestrator():
         return
 
     # Definir las familias de productos a raspar
-    familias = ["CELULARES"]
+    familias = ["CONSOLAS DE JUEGOS", "JUEGOS DE VIDEO", "ACCESORIOS DE CONSOLAS", 
+                "SMARTWATCH", "AUDIFONOS", "PROYECTORES", 
+                "LAPTOP Y MINI LAPTOP", "PC ESCRITORIO", "MONITORES", "TABLETAS", "CELULARES"]
 
     while True:
         now = datetime.datetime.now()

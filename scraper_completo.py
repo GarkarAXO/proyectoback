@@ -1,4 +1,3 @@
-
 import json
 import csv
 import urllib.request
@@ -26,7 +25,7 @@ def is_sku_cached(sku):
 def load_cached_sku(sku):
     return image_cache.get(sku, [])
 
-def cache_sku(sku, image_urls):
+# def cache_sku(sku, image_urls):  # <-- Desactivado para posprocesamiento
     image_cache[sku] = image_urls
     save_image_cache(image_cache)
 
@@ -160,13 +159,13 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
                 if is_sku_cached(sku):
                     imagenes = load_cached_sku(sku)
                 else:
-                    imagenes = obtener_imagenes_efectimundo(sku)
-                    cache_sku(sku, imagenes)
-                product_dict["Imagenes"] = imagenes
+# imagenes = obtener_imagenes_efectimundo(sku)  # <-- Desactivado para posprocesamiento
+# cache_sku(sku, imagenes)  # <-- Desactivado para posprocesamiento
+                    product_dict["Imagenes"] = []
 
-                product_dict["Tienda"] = nombre_sucursal
-                product_dict["ID_Sucursal"] = id_sucursal
-                all_products_from_store.append(product_dict)
+                    product_dict["Tienda"] = nombre_sucursal
+                    product_dict["ID_Sucursal"] = id_sucursal
+                    all_products_from_store.append(product_dict)
 
         except Exception as e:
             print(f"Error al procesar {familia} en {nombre_sucursal}: {e}")
