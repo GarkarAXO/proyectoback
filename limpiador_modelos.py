@@ -1,7 +1,6 @@
 import json
 import datetime
 import os
-import time
 
 from scraper_completo import scrape_store_for_families, agrupar_y_guardar_por_modelo
 
@@ -15,6 +14,7 @@ def load_json_file(filename):
         with open(filename, 'r', encoding='utf-8') as f:
             return json.load(f)
     except FileNotFoundError:
+        print(f"Error: Archivo {filename} no encontrado.")
         return None
     except json.JSONDecodeError as e:
         print(f"Error: Archivo {filename} no es un JSON válido. Detalles: {e}")
@@ -25,8 +25,16 @@ def limpiar_modelos_por_minimo_dispositivos(
     output_path=OUTPUT_FILTRADO,
     minimo=5
 ):
-    with open(input_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+        print(f"El archivo {input_path} no existe o está vacío. No se puede limpiar modelos.")
+        return
+
+    try:
+        with open(input_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"No se pudo abrir {input_path} para limpiar modelos: {e}")
+        return
 
     filtrados = {
         modelo: dispositivos
@@ -67,6 +75,8 @@ def main_orchestrator():
 
     familias = ["CELULARES"]  # Puedes cambiar familias aquí
 
+    scraping_realizado = False
+
     if is_time_to_scrape(OUTPUT_JSON, MIN_HOURS_BETWEEN_SCRAPES):
         print("Ejecutando scraping ahora...\n")
         all_scraped_products = []
@@ -78,15 +88,19 @@ def main_orchestrator():
         print(f"\n--- Scraping completado para todas las tiendas. Total de productos: {len(all_scraped_products)} ---")
         if all_scraped_products:
             agrupar_y_guardar_por_modelo(all_scraped_products, output_path=OUTPUT_JSON)
-            limpiar_modelos_por_minimo_dispositivos(
-                input_path=OUTPUT_JSON,
-                output_path=OUTPUT_FILTRADO,
-                minimo=5
-            )
+            scraping_realizado = True
         else:
             print(f"No se encontraron datos en ninguna tienda.")
     else:
         print("No se hará scraping en este ciclo. El archivo actual sigue vigente.")
+
+    # Limpiar siempre, ya sea con datos nuevos o existentes
+    limpiar_modelos_por_minimo_dispositivos(
+        input_path=OUTPUT_JSON,
+        output_path=OUTPUT_FILTRADO,
+        minimo=5
+    )
+    print("Limpieza de modelos ejecutada.")
 
 if __name__ == "__main__":
     main_orchestrator()
