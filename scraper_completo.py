@@ -1,55 +1,10 @@
 import json
-import csv
 import urllib.request
 import urllib.parse
 from html.parser import HTMLParser
 import os
-import requests
 
-# Sistema de caché simple en JSON
-CACHE_FILE = "imagenes_cache.json"
-
-def load_image_cache():
-    if os.path.exists(CACHE_FILE):
-        with open(CACHE_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    return {}
-
-def save_image_cache(cache):
-    with open(CACHE_FILE, "w", encoding="utf-8") as f:
-        json.dump(cache, f)
-
-def is_sku_cached(sku):
-    return sku in image_cache
-
-def load_cached_sku(sku):
-    return image_cache.get(sku, [])
-
-# def cache_sku(sku, image_urls):  # <-- Desactivado para posprocesamiento
-    image_cache[sku] = image_urls
-    save_image_cache(image_cache)
-
-def obtener_imagenes_efectimundo(sku):
-    url = "https://efectimundo.com.mx/catalogo/consulta_catalogo.php"
-    params = {
-        "metodo": "guardayMuestaImagenes",
-        "prenda": sku
-    }
-
-    try:
-        response = requests.post(url, params=params, timeout=5)
-        data = response.json()
-
-        if data.get("estatus") and "listaImagenes" in data:
-            return [
-                "https://efectimundo.com.mx/catalogo" + ruta["href"].lstrip(".")
-                for ruta in data["listaImagenes"]
-                if isinstance(ruta, dict) and "href" in ruta
-            ]
-    except Exception as e:
-        print(f"Error al obtener imagen para SKU {sku}: {e}")
-
-    return []
+OUTPUT_JSON = "productos_agrupados_por_modelo.json"
 
 class TableParser(HTMLParser):
     def __init__(self):
@@ -152,25 +107,66 @@ def scrape_store_for_families(id_sucursal, nombre_sucursal, familias):
                 product_dict = {headers[j]: item for j, item in enumerate(row)}
                 descripcion = product_dict.get("Descripción", "").lower()
                 tipo = product_dict.get("Tipo", "").lower()
-                if "dañado" in descripcion or "dañado" in tipo:
+
+                # Filtro de productos dañados o sin precio válido
+                if (
+                    "dañado" in descripcion or "dañad" in descripcion or "daniado" in descripcion or
+                    "broken" in descripcion or tipo == "con_reporte" or
+                    "dañado" in tipo or "broken" in tipo
+                ):
                     continue
 
-                sku = product_dict.get("Prenda / Sku Lote", "")
-                if is_sku_cached(sku):
-                    imagenes = load_cached_sku(sku)
-                else:
-# imagenes = obtener_imagenes_efectimundo(sku)  # <-- Desactivado para posprocesamiento
-# cache_sku(sku, imagenes)  # <-- Desactivado para posprocesamiento
-                    product_dict["Imagenes"] = []
+                precio_promocion = product_dict.get("Precio Promoción", "").replace("$", "").replace(",", "").strip()
+                try:
+                    if not precio_promocion or float(precio_promocion) <= 0:
+                        continue
+                except Exception:
+                    continue
 
-                    product_dict["Tienda"] = nombre_sucursal
-                    product_dict["ID_Sucursal"] = id_sucursal
-                    all_products_from_store.append(product_dict)
+                producto_limpio = {
+                    "SKU": product_dict.get("Prenda / Sku Lote", "").strip(),
+                    "Marca": product_dict.get("Marca", "").strip(),
+                    "Modelo": product_dict.get("Modelo", "").strip(),
+                    "Descripción": product_dict.get("Descripción", "").strip(),
+                    "Precio Promoción": product_dict.get("Precio Promoción", "").strip(),
+                    "Sucursal": nombre_sucursal.strip()
+                }
+
+                all_products_from_store.append(producto_limpio)
 
         except Exception as e:
             print(f"Error al procesar {familia} en {nombre_sucursal}: {e}")
 
     return all_products_from_store
 
-# Inicializar caché global
-image_cache = load_image_cache()
+def agrupar_y_guardar_por_modelo(productos, output_path=OUTPUT_JSON):
+    agrupados = {}
+    for p in productos:
+        marca = p.get('Marca', '').strip().upper()
+        modelo = p.get('Modelo', '').strip().upper()
+        clave = f"{marca}::{modelo}"
+
+        precio_str = p.get("Precio Promoción", "").replace("$", "").replace(",", "").strip()
+        try:
+            precio = float(precio_str)
+        except Exception:
+            continue
+        if precio <= 0:
+            continue  # Solo precios válidos
+
+        if clave not in agrupados:
+            agrupados[clave] = []
+        agrupados[clave].append((precio, p))
+
+    # Ordena de menor a mayor precio cada grupo
+    agrupados_ordenados = {
+        clave: [prod for precio, prod in sorted(lista, key=lambda x: x[0])]
+        for clave, lista in agrupados.items()
+    }
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(agrupados_ordenados, f, indent=2, ensure_ascii=False)
+    print(f"\nProductos agrupados y guardados en {output_path}")
+
+# ---------- EJEMPLO DE USO -----------
+# all_products = scrape_store_for_families("01", "SUCURSAL CENTRO", ["Consolas", "Celulares", "Pantallas"])
+# agrupar_y_guardar_por_modelo(all_products)
