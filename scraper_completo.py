@@ -1,8 +1,9 @@
 import json
 import urllib.request
 import urllib.parse
-from html.parser import HTMLParser
+import requests
 import os
+from html.parser import HTMLParser
 
 OUTPUT_JSON = "productos_agrupados_por_modelo.json"
 
@@ -167,6 +168,30 @@ def agrupar_y_guardar_por_modelo(productos, output_path=OUTPUT_JSON):
         json.dump(agrupados_ordenados, f, indent=2, ensure_ascii=False)
     print(f"\nProductos agrupados y guardados en {output_path}")
 
+# ---- FUNCIÓN PARA OBTENER IMÁGENES POR SKU ----
+def obtener_imagenes_efectimundo(sku):
+    url = "https://efectimundo.com.mx/catalogo/consulta_catalogo.php"
+    params = {
+        "metodo": "guardayMuestaImagenes",
+        "prenda": sku
+    }
+    try:
+        response = requests.post(url, params=params, timeout=5)
+        data = response.json()
+
+        if data.get("estatus") and "listaImagenes" in data:
+            return [
+                "https://efectimundo.com.mx/catalogo" + img.get("href", "").lstrip(".")
+                for img in data["listaImagenes"]
+                if isinstance(img, dict) and "href" in img
+            ]
+    except Exception as e:
+        print(f"Error al obtener imagen para SKU {sku}: {e}")
+
+    return []
+
 # ---------- EJEMPLO DE USO -----------
 # all_products = scrape_store_for_families("01", "SUCURSAL CENTRO", ["Consolas", "Celulares", "Pantallas"])
 # agrupar_y_guardar_por_modelo(all_products)
+# imagenes = obtener_imagenes_efectimundo("123456")
+# print(imagenes)

@@ -23,7 +23,7 @@ def load_json_file(filename):
 def limpiar_modelos_por_minimo_dispositivos(
     input_path=OUTPUT_JSON,
     output_path=OUTPUT_FILTRADO,
-    minimo=5
+    minimo=8
 ):
     if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
         print(f"El archivo {input_path} no existe o está vacío. No se puede limpiar modelos.")
@@ -98,7 +98,7 @@ def main_orchestrator():
     limpiar_modelos_por_minimo_dispositivos(
         input_path=OUTPUT_JSON,
         output_path=OUTPUT_FILTRADO,
-        minimo=5
+        minimo=8
     )
     print("Limpieza de modelos ejecutada.")
 

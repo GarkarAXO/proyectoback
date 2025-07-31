@@ -1,13 +1,15 @@
 import json
 import datetime
 import os
-import time
 
 from scraper_completo import scrape_store_for_families, agrupar_y_guardar_por_modelo
+from analizador_modelos import procesar_modelos
+from notificador_slack import notificar_gangas_encontradas  # <-- Agrega este import
 
 STORES_FILE = "stores.json"
 OUTPUT_JSON = "productos_agrupados_por_modelo.json"
 OUTPUT_FILTRADO = "productos_agrupados_filtrados.json"
+ANALISIS_JSON = "analisis_modelos.json"
 MIN_HOURS_BETWEEN_SCRAPES = 6
 
 def load_json_file(filename):
@@ -25,6 +27,10 @@ def limpiar_modelos_por_minimo_dispositivos(
     output_path=OUTPUT_FILTRADO,
     minimo=5
 ):
+    if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
+        print(f"El archivo {input_path} no existe o está vacío. No se puede limpiar modelos.")
+        return
+
     with open(input_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
@@ -67,6 +73,8 @@ def main_orchestrator():
 
     familias = ["CELULARES"]  # Puedes cambiar familias aquí
 
+    scraping_realizado = False
+
     if is_time_to_scrape(OUTPUT_JSON, MIN_HOURS_BETWEEN_SCRAPES):
         print("Ejecutando scraping ahora...\n")
         all_scraped_products = []
@@ -78,15 +86,30 @@ def main_orchestrator():
         print(f"\n--- Scraping completado para todas las tiendas. Total de productos: {len(all_scraped_products)} ---")
         if all_scraped_products:
             agrupar_y_guardar_por_modelo(all_scraped_products, output_path=OUTPUT_JSON)
-            limpiar_modelos_por_minimo_dispositivos(
-                input_path=OUTPUT_JSON,
-                output_path=OUTPUT_FILTRADO,
-                minimo=5
-            )
+            scraping_realizado = True
         else:
             print(f"No se encontraron datos en ninguna tienda.")
     else:
         print("No se hará scraping en este ciclo. El archivo actual sigue vigente.")
+
+    # Limpiar siempre, ya sea con datos nuevos o existentes
+    limpiar_modelos_por_minimo_dispositivos(
+        input_path=OUTPUT_JSON,
+        output_path=OUTPUT_FILTRADO,
+        minimo=5
+    )
+    print("Limpieza de modelos ejecutada.")
+
+    # Analizar modelos SIEMPRE con los datos filtrados actuales
+    procesar_modelos(
+        input_path=OUTPUT_FILTRADO,
+        output_path=ANALISIS_JSON
+    )
+    print("Análisis de modelos ejecutado.")
+
+    # Notificar gangas encontradas a Slack
+    notificar_gangas_encontradas(ANALISIS_JSON)
+    print("Notificación de gangas en Slack enviada.")
 
 if __name__ == "__main__":
     main_orchestrator()
