@@ -1,7 +1,7 @@
 import json
 import datetime
 import os
-
+import time
 from scraper_completo import scrape_store_for_families, agrupar_y_guardar_por_modelo
 from analizador_modelos import procesar_modelos
 from notificador_slack import notificar_gangas_encontradas  # <-- Agrega este import
@@ -65,13 +65,44 @@ def is_time_to_scrape(file_path, min_hours):
         return False
 
 def main_orchestrator():
-    print("Iniciando orquestador principal (scraping cada 6 horas si corresponde)...")
+    START_HOUR = 7
+    END_HOUR = 19  # 7 am a 7 pm
+
+    while True:
+        now = datetime.datetime.now()
+
+        if now.hour < START_HOUR or now.hour >= END_HOUR:
+            # Calcula cuántos segundos faltan para las 7 am del siguiente día (si es después de 7 pm)
+            if now.hour >= END_HOUR:
+                next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+            else:
+                next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
+
+            wait_seconds = (next_run - now).total_seconds()
+            print(f"Fuera del horario permitido ({START_HOUR}:00 a {END_HOUR}:00). Hora actual: {now.strftime('%H:%M')}. Durmiendo hasta las 7:00 am... ({wait_seconds//60:.0f} minutos)")
+            time.sleep(wait_seconds)
+            continue
+        print("Iniciando orquestador principal (scraping cada 6 horas si corresponde)...")
+        # ...el resto de tu código principal del orquestador aquí...
+
+        break  # Solo ejecuta una vez y sale. Si quieres que se repita, quita este break.
+
 
     stores_data = load_json_file(STORES_FILE)
     if stores_data is None:
         return
 
-    familias = ["CELULARES"]  # Puedes cambiar familias aquí
+    familias = ["CELULARES",
+    "CONSOLAS DE JUEGOS",
+    "AUDIFONOS",
+    "SMARTWATCH",
+    "TABLETAS",
+    "LAPTOP Y MINI LAPTOP",
+    "PC ESCRITORIO",
+    "MONITORES",
+    "PROYECTORES",
+    "JUEGOS DE VIDEO",
+    "ACCESORIOS DE CONSOLAS"]  # Puedes cambiar familias aquí
 
     scraping_realizado = False
 

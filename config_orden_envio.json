@@ -1,6 +1,16 @@
 {
   "familias_ordenadas": [
-    "CELULARES"
+    "CELULARES",
+    "CONSOLAS DE JUEGOS",
+    "AUDIFONOS",
+    "SMARTWATCH",
+    "TABLETAS",
+    "LAPTOP Y MINI LAPTOP",
+    "PC ESCRITORIO",
+    "MONITORES",
+    "PROYECTORES",
+    "JUEGOS DE VIDEO",
+    "ACCESORIOS DE CONSOLAS"
   ],
   "sucursales_ordenadas": {
     "151": "Chilpancingo",
