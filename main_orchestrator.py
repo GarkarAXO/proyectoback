@@ -4,13 +4,13 @@ import os
 import time
 from scraper_completo import scrape_store_for_families, agrupar_y_guardar_por_modelo
 from analizador_modelos import procesar_modelos
-from notificador_slack import notificar_gangas_encontradas  # <-- Agrega este import
+from notificador_slack import notificar_gangas_encontradas
 
 STORES_FILE = "stores.json"
 OUTPUT_JSON = "productos_agrupados_por_modelo.json"
 OUTPUT_FILTRADO = "productos_agrupados_filtrados.json"
 ANALISIS_JSON = "analisis_modelos.json"
-MIN_HOURS_BETWEEN_SCRAPES = 6
+MIN_HOURS_BETWEEN_SCRAPES = 6  # horas
 
 def load_json_file(filename):
     try:
@@ -49,7 +49,6 @@ def limpiar_modelos_por_minimo_dispositivos(
     )
 
 def is_time_to_scrape(file_path, min_hours):
-    """Verifica si han pasado al menos min_hours desde la última modificación del archivo."""
     if not os.path.exists(file_path):
         return True
     if os.path.getsize(file_path) == 0:
@@ -66,81 +65,66 @@ def is_time_to_scrape(file_path, min_hours):
 
 def main_orchestrator():
     START_HOUR = 7
-    END_HOUR = 19  # 7 am a 7 pm
+    END_HOUR = 19  # 7 am a 7:59 pm
 
     while True:
         now = datetime.datetime.now()
 
         if now.hour < START_HOUR or now.hour >= END_HOUR:
-            # Calcula cuántos segundos faltan para las 7 am del siguiente día (si es después de 7 pm)
             if now.hour >= END_HOUR:
                 next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
             else:
                 next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
 
             wait_seconds = (next_run - now).total_seconds()
-            print(f"Fuera del horario permitido ({START_HOUR}:00 a {END_HOUR}:00). Hora actual: {now.strftime('%H:%M')}. Durmiendo hasta las 7:00 am... ({wait_seconds//60:.0f} minutos)")
+            print(f"⏸ Fuera del horario permitido ({START_HOUR}:00 a {END_HOUR}:00). Hora actual: {now.strftime('%H:%M')}.")
+            print(f"   Durmiendo hasta las {START_HOUR}:00... ({wait_seconds//60:.0f} minutos)")
             time.sleep(wait_seconds)
             continue
-        print("Iniciando orquestador principal (scraping cada 6 horas si corresponde)...")
-        # ...el resto de tu código principal del orquestador aquí...
 
-        break  # Solo ejecuta una vez y sale. Si quieres que se repita, quita este break.
+        print(f"\n⏱ Iniciando orquestador principal - {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        stores_data = load_json_file(STORES_FILE)
+        if stores_data is None:
+            print("⚠ No se pudo cargar el archivo de tiendas.")
+            time.sleep(60 * 30)
+            continue
 
+        familias = [
+            "CELULARES",
+            "CONSOLAS DE JUEGOS",
+            "AUDIFONOS",
+            "SMARTWATCH",
+            "TABLETAS",
+            "LAPTOP Y MINI LAPTOP",
+            "PC ESCRITORIO",
+            "MONITORES",
+            "PROYECTORES",
+            "JUEGOS DE VIDEO",
+            "ACCESORIOS DE CONSOLAS"
+        ]
 
-    stores_data = load_json_file(STORES_FILE)
-    if stores_data is None:
-        return
+        if is_time_to_scrape(OUTPUT_JSON, MIN_HOURS_BETWEEN_SCRAPES):
+            print("🔍 Ejecutando scraping ahora...\n")
+            all_scraped_products = []
+            for id_sucursal, nombre_sucursal in stores_data.items():
+                print(f"📍 Procesando tienda: {nombre_sucursal} (ID: {id_sucursal})")
+                scraped_data_from_store = scrape_store_for_families(id_sucursal, nombre_sucursal, familias)
+                all_scraped_products.extend(scraped_data_from_store)
 
-    familias = ["CELULARES",
-    "CONSOLAS DE JUEGOS",
-    "AUDIFONOS",
-    "SMARTWATCH",
-    "TABLETAS",
-    "LAPTOP Y MINI LAPTOP",
-    "PC ESCRITORIO",
-    "MONITORES",
-    "PROYECTORES",
-    "JUEGOS DE VIDEO",
-    "ACCESORIOS DE CONSOLAS"]  # Puedes cambiar familias aquí
-
-    scraping_realizado = False
-
-    if is_time_to_scrape(OUTPUT_JSON, MIN_HOURS_BETWEEN_SCRAPES):
-        print("Ejecutando scraping ahora...\n")
-        all_scraped_products = []
-        for id_sucursal, nombre_sucursal in stores_data.items():
-            print(f"Procesando tienda: {nombre_sucursal} (ID: {id_sucursal})")
-            scraped_data_from_store = scrape_store_for_families(id_sucursal, nombre_sucursal, familias)
-            all_scraped_products.extend(scraped_data_from_store)
-
-        print(f"\n--- Scraping completado para todas las tiendas. Total de productos: {len(all_scraped_products)} ---")
-        if all_scraped_products:
-            agrupar_y_guardar_por_modelo(all_scraped_products, output_path=OUTPUT_JSON)
-            scraping_realizado = True
+            print(f"\n--- ✅ Scraping completado. Total de productos: {len(all_scraped_products)} ---")
+            if all_scraped_products:
+                agrupar_y_guardar_por_modelo(all_scraped_products, output_path=OUTPUT_JSON)
+            else:
+                print("⚠ No se encontraron datos en ninguna tienda.")
         else:
-            print(f"No se encontraron datos en ninguna tienda.")
-    else:
-        print("No se hará scraping en este ciclo. El archivo actual sigue vigente.")
+            print("⏭ No se hará scraping en este ciclo. El archivo actual sigue vigente.")
 
-    # Limpiar siempre, ya sea con datos nuevos o existentes
-    limpiar_modelos_por_minimo_dispositivos(
-        input_path=OUTPUT_JSON,
-        output_path=OUTPUT_FILTRADO,
-        minimo=5
-    )
-    print("Limpieza de modelos ejecutada.")
+        limpiar_modelos_por_minimo_dispositivos(input_path=OUTPUT_JSON, output_path=OUTPUT_FILTRADO, minimo=5)
+        procesar_modelos(input_path=OUTPUT_FILTRADO, output_path=ANALISIS_JSON)
+        notificar_gangas_encontradas(ANALISIS_JSON)
 
-    # Analizar modelos SIEMPRE con los datos filtrados actuales
-    procesar_modelos(
-        input_path=OUTPUT_FILTRADO,
-        output_path=ANALISIS_JSON
-    )
-    print("Análisis de modelos ejecutado.")
-
-    # Notificar gangas encontradas a Slack
-    notificar_gangas_encontradas(ANALISIS_JSON)
-    print("Notificación de gangas en Slack enviada.")
+        print("\n✅ Ciclo finalizado. Esperando 6 horas antes del siguiente...")
+        time.sleep(60 * 60 * 6)
 
 if __name__ == "__main__":
     main_orchestrator()

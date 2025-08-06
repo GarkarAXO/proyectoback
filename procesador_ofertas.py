@@ -11,8 +11,6 @@ from scraper_completo import obtener_imagenes_efectimundo
 
 load_dotenv()
 
-START_SEND_HOUR = 7
-END_SEND_HOUR = 20
 MIN_DOMINANT_FREQ = 3
 MIN_PROFIT_THRESHOLD = 100.0
 MIN_FINAL_PROFIT = 500
@@ -47,7 +45,7 @@ def estimate_intermediate_range(precios):
     return q1, q3
 
 def process_and_send_all_deals(all_scraped_products):
-    print(f"--- Procesando y enviando solo top 3 gangas (sin IA) de cada modelo (flujo rápido) ---")
+    print(f"--- Procesando y enviando solo top 5 gangas (sin IA) de cada modelo ---")
     print(f"Total productos recibidos: {len(all_scraped_products)}")
 
     # Agrupar por modelo
@@ -76,7 +74,7 @@ def process_and_send_all_deals(all_scraped_products):
             if precio_dominante <= precio <= precio_maximo:
                 continue
 
-            # 2. Solo considera para IA los precios menores al dominante
+            # 2. Solo considera precios menores al dominante
             if precio < precio_dominante:
                 margen_dominante = precio_dominante - precio
                 margen_maximo = precio_maximo - precio
@@ -96,13 +94,6 @@ def process_and_send_all_deals(all_scraped_products):
         print("No hay gangas candidatas que cumplan las condiciones.")
         return
 
-    now = datetime.datetime.now()
-    if now.hour >= END_SEND_HOUR:
-        print("Fuera del horario permitido.")
-        return
-
-    intervalo_envio = 180  # 3 minutos fijos entre envíos
-
     # Cargar caché si existe
     if os.path.exists(IMAGENES_CACHE_FILE):
         with open(IMAGENES_CACHE_FILE, "r") as f:
@@ -110,20 +101,23 @@ def process_and_send_all_deals(all_scraped_products):
     else:
         imagenes_cache = {}
 
+    # Agrupar gangas por modelo
     gangas_por_modelo = defaultdict(list)
     for ganga in final_deals_to_send:
         modelo_key = (ganga.get("Marca", "").strip(), ganga.get("Modelo", "").strip())
         gangas_por_modelo[modelo_key].append(ganga)
 
-    top3_por_modelo = []
+    # Tomar top 5 por modelo
+    top5_por_modelo = []
     for modelo_key, gangas in gangas_por_modelo.items():
         gangas.sort(key=lambda x: clean_price_str(x.get("Precio Promoción", "0")))
-        top_3_gangas = gangas[:3]
-        if top_3_gangas:
-            precio_mas_bajo = clean_price_str(top_3_gangas[0].get("Precio Promoción", "0"))
-            top3_por_modelo.append((precio_mas_bajo, modelo_key, top_3_gangas))
+        top_5_gangas = gangas[:5]  # Ahora tomamos 5 en lugar de 3
+        if top_5_gangas:
+            precio_mas_bajo = clean_price_str(top_5_gangas[0].get("Precio Promoción", "0"))
+            top5_por_modelo.append((precio_mas_bajo, modelo_key, top_5_gangas))
 
-    top3_por_modelo.sort(key=lambda x: x[0])
+    top5_por_modelo.sort(key=lambda x: x[0])
 
-    # Puedes seguir guardando resultados si lo necesitas, o simplemente retorna top3_por_modelo
+    # Aquí puedes integrar la lógica de envío a Slack si lo deseas
     print("Procesamiento terminado (sin IA en esta etapa).")
+    print(f"Se han seleccionado {sum(len(x[2]) for x in top5_por_modelo)} dispositivos para enviar.")

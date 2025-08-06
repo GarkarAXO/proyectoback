@@ -11,8 +11,36 @@ load_dotenv()
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 client = WebClient(token=SLACK_BOT_TOKEN)
 
-# Historial para controlar 1 sucursal por día
-ENVIADAS_HOY = {"fecha": str(date.today()), "sucursal": None}
+# Historial para controlar hasta 3 sucursales por día
+# Ruta del archivo persistente
+SUCURSALES_FILE = "sucursales_enviadas.json"
+
+# Cargar historial de sucursales enviadas
+def cargar_sucursales_enviadas():
+    if os.path.exists(SUCURSALES_FILE):
+        try:
+            with open(SUCURSALES_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error cargando historial de sucursales: {e}")
+    return {"fecha": str(date.today()), "sucursales": []}
+
+# Guardar historial actualizado
+def guardar_sucursales_enviadas(data):
+    try:
+        with open(SUCURSALES_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Error guardando historial de sucursales: {e}")
+
+# Inicializar historial
+ENVIADAS_HOY = cargar_sucursales_enviadas()
+
+# Reset diario si es nuevo día
+if ENVIADAS_HOY["fecha"] != str(date.today()):
+    ENVIADAS_HOY = {"fecha": str(date.today()), "sucursales": []}
+    guardar_sucursales_enviadas(ENVIADAS_HOY)
+
 
 # Orden de sucursales y familias
 try:
@@ -28,9 +56,11 @@ except Exception as e:
     SLACK_CHANNEL_ID = ""
     print(f"Advertencia al cargar el orden de envío: {e}")
 
+
 # IA DESACTIVADA TEMPORALMENTE
 def analyze_offer_with_openai(product_data, productos_modelo):
     return "Sí\nMotivo: IA desactivada temporalmente"
+
 
 def format_slack_blocks(marca, modelo, articulo, q1, q3,
                         cantidad_rango_bajo, rango_bajo_str,
@@ -38,7 +68,6 @@ def format_slack_blocks(marca, modelo, articulo, q1, q3,
                         channel_id, message_ts,
                         openai_msg=None):
     blocks = []
-
     # Texto principal
     blocks.append({
         "type": "section",
@@ -78,7 +107,7 @@ def format_slack_blocks(marca, modelo, articulo, q1, q3,
             "alt_text": f"Imagen de {marca} {modelo}"
         })
 
-    # Botones con ts y channel_id
+    # Botones
     buttons_value = {
         "sku": articulo["SKU"],
         "marca": marca,
@@ -86,7 +115,6 @@ def format_slack_blocks(marca, modelo, articulo, q1, q3,
         "channel_id": channel_id,
         "message_ts": message_ts
     }
-
     blocks.append({
         "type": "actions",
         "elements": [
@@ -107,7 +135,7 @@ def format_slack_blocks(marca, modelo, articulo, q1, q3,
         ]
     })
 
-    # Análisis IA
+    # IA
     if openai_msg:
         partes = openai_msg.split("\n", 1)
         decision = partes[0].strip()
@@ -123,6 +151,7 @@ def format_slack_blocks(marca, modelo, articulo, q1, q3,
     blocks.append({"type": "divider"})
     return blocks
 
+
 def orden_key(articulo):
     familia = articulo.get("Familia", "")
     sucursal = articulo.get("Sucursal", "")
@@ -130,6 +159,7 @@ def orden_key(articulo):
     familia_idx = FAMILIAS_ORDENADAS.index(familia) if familia in FAMILIAS_ORDENADAS else len(FAMILIAS_ORDENADAS)
     sucursal_idx = SUCURSALES_ORDENADAS_LIST.index(sucursal) if sucursal in SUCURSALES_ORDENADAS_LIST else len(SUCURSALES_ORDENADAS_LIST)
     return (familia_idx, sucursal_idx, precio)
+
 
 def send_slack_notification(payload_blocks):
     if not SLACK_CHANNEL_ID:
@@ -141,28 +171,25 @@ def send_slack_notification(payload_blocks):
             text="¡Oferta detectada!",
             blocks=payload_blocks
         )
-        message_ts = response.get("ts")
-        print("Mensaje enviado por bot:", message_ts)
-        return message_ts
+        return response.get("ts")
     except Exception as e:
         print("No se pudo enviar la notificación a Slack (bot):", e)
         return None
 
+
 def notificar_gangas_encontradas(path_analisis="analisis_modelos.json", productos_por_modelo_path="productos_agrupados_por_modelo.json"):
     global ENVIADAS_HOY
 
+    # Reset diario
     if ENVIADAS_HOY["fecha"] != str(date.today()):
-        ENVIADAS_HOY = {"fecha": str(date.today()), "sucursal": None}
+        ENVIADAS_HOY = {"fecha": str(date.today()), "sucursales": []}
 
     with open(productos_por_modelo_path, "r", encoding="utf-8") as f:
         productos_por_modelo = json.load(f)
     with open(path_analisis, "r", encoding="utf-8") as f:
         analisis = json.load(f)
 
-    ofertas_enviadas = 0
     articulos_a_enviar = []
-
-    # Preparar lista de envíos
     for modelo_key, info in analisis.items():
         if "::" in modelo_key:
             marca, modelo = modelo_key.split("::", 1)
@@ -172,25 +199,21 @@ def notificar_gangas_encontradas(path_analisis="analisis_modelos.json", producto
         q1 = info.get("q1", 0)
         q3 = info.get("q3", 0)
         productos_modelo = productos_por_modelo.get(modelo_key, [])
-        top_4 = info.get("top_4_mas_baratos", [])
 
-        if not top_4 or not productos_modelo:
+        # Usar top_5_mas_baratos si existe, si no usar top_4
+        top_ofertas = info.get("top_5_mas_baratos") or info.get("top_4_mas_baratos", [])
+        if not top_ofertas or not productos_modelo:
             continue
 
-        precio_minimo = float(top_4[0]["Precio Promoción"].replace("$", "").replace(",", ""))
-        rango_bajo_inicio = precio_minimo
-        rango_bajo_fin = q1
-        rango_bajo_str = f"${rango_bajo_inicio:,.0f} a ${rango_bajo_fin:,.0f}"
-
-        cantidad_rango_bajo = sum(rango_bajo_inicio <= float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= rango_bajo_fin for p in productos_modelo)
+        precio_minimo = float(top_ofertas[0]["Precio Promoción"].replace("$", "").replace(",", ""))
+        rango_bajo_str = f"${precio_minimo:,.0f} a ${q1:,.0f}"
+        cantidad_rango_bajo = sum(precio_minimo <= float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= q1 for p in productos_modelo)
         cantidad_dominante = sum(q1 <= float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= q3 for p in productos_modelo)
+        precio_maximo = max(float(p["Precio Promoción"].replace("$", "").replace(",", "")) for p in productos_modelo)
+        rango_alto_str = f"${q3:,.0f} a ${precio_maximo:,.0f}"
+        cantidad_rango_alto = sum(q3 < float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= precio_maximo for p in productos_modelo)
 
-        rango_alto_inicio = q3
-        precio_maximo = max(float(p["Precio Promoción"].replace("$", "").replace(",", "")) for p in productos_modelo) if productos_modelo else q3
-        rango_alto_str = f"${rango_alto_inicio:,.0f} a ${precio_maximo:,.0f}"
-        cantidad_rango_alto = sum(rango_alto_inicio < float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= precio_maximo for p in productos_modelo)
-
-        for articulo in top_4:
+        for articulo in top_ofertas:
             articulos_a_enviar.append({
                 "marca": marca,
                 "modelo": modelo,
@@ -205,66 +228,56 @@ def notificar_gangas_encontradas(path_analisis="analisis_modelos.json", producto
                 "productos_modelo": productos_modelo
             })
 
+    # Ordenar por sucursal y familia
     articulos_a_enviar.sort(key=lambda x: orden_key(x["articulo"]))
 
-    # Filtrar solo la sucursal del día
-    if ENVIADAS_HOY["sucursal"]:
-        articulos_a_enviar = [a for a in articulos_a_enviar if a["articulo"]["Sucursal"] == ENVIADAS_HOY["sucursal"]]
-    else:
-        if articulos_a_enviar:
-            ENVIADAS_HOY["sucursal"] = articulos_a_enviar[0]["articulo"]["Sucursal"]
-            articulos_a_enviar = [a for a in articulos_a_enviar if a["articulo"]["Sucursal"] == ENVIADAS_HOY["sucursal"]]
+    # Determinar sucursales permitidas (máximo 3 nuevas por día)
+    sucursales_permitidas = set(ENVIADAS_HOY["sucursales"])
+    for art in articulos_a_enviar:
+        sucursal = art["articulo"]["Sucursal"]
+        if len(sucursales_permitidas) >= 3:
+            break
+        sucursales_permitidas.add(sucursal)
 
-    for item in articulos_a_enviar:
+    # Filtrar artículos de esas sucursales
+    articulos_filtrados = [a for a in articulos_a_enviar if a["articulo"]["Sucursal"] in sucursales_permitidas]
+    ENVIADAS_HOY["sucursales"] = list(sucursales_permitidas)
+    guardar_sucursales_enviadas(ENVIADAS_HOY)
+
+
+    # Enviar artículos filtrados
+    ofertas_enviadas = 0
+    for item in articulos_filtrados:
         openai_msg = analyze_offer_with_openai(item["articulo"], item["productos_modelo"])
-        if openai_msg.lower().startswith("sí") or openai_msg.lower().startswith("si"):
-            # Enviar mensaje inicial para obtener ts
-            temp_blocks = format_slack_blocks(
-                marca=item["marca"],
-                modelo=item["modelo"],
-                articulo=item["articulo"],
-                q1=item["q1"],
-                q3=item["q3"],
-                cantidad_rango_bajo=item["cantidad_rango_bajo"],
-                rango_bajo_str=item["rango_bajo_str"],
-                cantidad_dominante=item["cantidad_dominante"],
-                cantidad_rango_alto=item["cantidad_rango_alto"],
-                rango_alto_str=item["rango_alto_str"],
-                channel_id=SLACK_CHANNEL_ID,
-                message_ts=""
-            )
-            message_ts = send_slack_notification(temp_blocks)
-            if not message_ts:
-                continue
+        if not openai_msg.lower().startswith("sí") and not openai_msg.lower().startswith("si"):
+            continue
 
-            # Actualizar mensaje con ts real
-            blocks = format_slack_blocks(
-                marca=item["marca"],
-                modelo=item["modelo"],
-                articulo=item["articulo"],
-                q1=item["q1"],
-                q3=item["q3"],
-                cantidad_rango_bajo=item["cantidad_rango_bajo"],
-                rango_bajo_str=item["rango_bajo_str"],
-                cantidad_dominante=item["cantidad_dominante"],
-                cantidad_rango_alto=item["cantidad_rango_alto"],
-                rango_alto_str=item["rango_alto_str"],
-                channel_id=SLACK_CHANNEL_ID,
-                message_ts=message_ts,
-                openai_msg=openai_msg
-            )
-            try:
-                client.chat_update(
-                    channel=SLACK_CHANNEL_ID,
-                    ts=message_ts,
-                    text="¡Oferta detectada!",
-                    blocks=blocks
-                )
-            except Exception as e:
-                print(f"Error al actualizar mensaje: {e}")
+        temp_blocks = format_slack_blocks(
+            marca=item["marca"], modelo=item["modelo"], articulo=item["articulo"],
+            q1=item["q1"], q3=item["q3"],
+            cantidad_rango_bajo=item["cantidad_rango_bajo"], rango_bajo_str=item["rango_bajo_str"],
+            cantidad_dominante=item["cantidad_dominante"], cantidad_rango_alto=item["cantidad_rango_alto"],
+            rango_alto_str=item["rango_alto_str"], channel_id=SLACK_CHANNEL_ID, message_ts=""
+        )
+        message_ts = send_slack_notification(temp_blocks)
+        if not message_ts:
+            continue
 
-            ofertas_enviadas += 1
-            print(f"Oferta enviada: {item['marca']} {item['modelo']} - Esperando 3 minutos...")
-            time.sleep(180)
+        blocks = format_slack_blocks(
+            marca=item["marca"], modelo=item["modelo"], articulo=item["articulo"],
+            q1=item["q1"], q3=item["q3"],
+            cantidad_rango_bajo=item["cantidad_rango_bajo"], rango_bajo_str=item["rango_bajo_str"],
+            cantidad_dominante=item["cantidad_dominante"], cantidad_rango_alto=item["cantidad_rango_alto"],
+            rango_alto_str=item["rango_alto_str"], channel_id=SLACK_CHANNEL_ID, message_ts=message_ts,
+            openai_msg=openai_msg
+        )
+        try:
+            client.chat_update(channel=SLACK_CHANNEL_ID, ts=message_ts, text="¡Oferta detectada!", blocks=blocks)
+        except Exception as e:
+            print(f"Error al actualizar mensaje: {e}")
 
-    print(f"Ofertas totales enviadas hoy ({ENVIADAS_HOY['fecha']}): {ofertas_enviadas}")
+        ofertas_enviadas += 1
+        print(f"Oferta enviada: {item['marca']} {item['modelo']} ({item['articulo']['Sucursal']}) - Esperando 3 minutos...")
+        time.sleep(180)
+
+    print(f"Ofertas totales enviadas hoy ({ENVIADAS_HOY['fecha']}): {ofertas_enviadas} | Sucursales: {ENVIADAS_HOY['sucursales']}")
