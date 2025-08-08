@@ -7,24 +7,22 @@ from datetime import date
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 
-# Cargar .env
 dotenv_path = os.path.join(os.path.dirname(__file__), ".env")
 load_dotenv(dotenv_path)
 
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 if SLACK_BOT_TOKEN:
-    print(f"[DEBUG] Token cargado en FastAPI: {SLACK_BOT_TOKEN[:6]}...{SLACK_BOT_TOKEN[-4:]}")
+    print(f"[DEBUG] Token loaded in FastAPI: {SLACK_BOT_TOKEN[:6]}...{SLACK_BOT_TOKEN[-4:]}")
 else:
-    print("[DEBUG] SLACK_BOT_TOKEN no encontrado en variables de entorno")
+    print("[DEBUG] SLACK_BOT_TOKEN not found in environment variables")
 
 client = WebClient(token=SLACK_BOT_TOKEN)
 app = FastAPI()
 
-REGISTRO_FILE = "registro_envios.json"
+INTERACTION_LOG_FILE = "interaction_log.json"
 
-
-def obtener_nombre_usuario(user_info: dict) -> str:
-    """Obtiene solo el real_name del usuario. Si no está en el payload, lo pide a Slack API."""
+def get_user_display_name(user_info: dict) -> str:
+    """Gets the real_name of the user from payload or Slack API."""
     real_name = user_info.get("real_name")
     if real_name:
         return real_name
@@ -37,41 +35,39 @@ def obtener_nombre_usuario(user_info: dict) -> str:
                 profile = slack_resp["user"]["profile"]
                 return profile.get("real_name") or user_id
         except Exception as e:
-            print(f"Error al obtener real_name desde Slack API: {e}")
+            print(f"Error retrieving real_name from Slack API: {e}")
 
     return "desconocido"
 
+def register_interaction(action_type: str, data_item: dict):
+    """Registers interaction (accepted/rejected) in a JSON file by date."""
+    today = str(date.today())
+    log_data = {}
 
-def registrar_interaccion(tipo: str, data_item: dict):
-    """Registra en el archivo JSON la interacción (aceptado o rechazado)."""
-    hoy = str(date.today())
-    registro = {}
-
-    if os.path.exists(REGISTRO_FILE):
+    if os.path.exists(INTERACTION_LOG_FILE):
         try:
-            with open(REGISTRO_FILE, "r", encoding="utf-8") as f:
-                registro = json.load(f)
+            with open(INTERACTION_LOG_FILE, "r", encoding="utf-8") as f:
+                log_data = json.load(f)
         except json.JSONDecodeError:
-            registro = {}
+            log_data = {}
 
-    if hoy not in registro:
-        registro[hoy] = {"aceptados": [], "rechazados": []}
+    if today not in log_data:
+        log_data[today] = {"accepted": [], "rejected": []}
 
-    if tipo == "aceptado":
-        registro[hoy]["aceptados"].append(data_item)
-    elif tipo == "rechazado":
-        registro[hoy]["rechazados"].append(data_item)
+    if action_type == "accepted":
+        log_data[today]["accepted"].append(data_item)
+    elif action_type == "rejected":
+        log_data[today]["rejected"].append(data_item)
 
-    with open(REGISTRO_FILE, "w", encoding="utf-8") as f:
-        json.dump(registro, f, indent=2, ensure_ascii=False)
-
+    with open(INTERACTION_LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(log_data, f, indent=2, ensure_ascii=False)
 
 @app.post("/slack/interactivity")
 async def slack_interactivity(payload: str = Form(...)):
     data = json.loads(payload)
 
     user_info = data.get("user", {})
-    user_display = obtener_nombre_usuario(user_info)
+    user_display = get_user_display_name(user_info)
 
     actions = data.get("actions", [])
     action = actions[0] if actions else {}
@@ -81,9 +77,9 @@ async def slack_interactivity(payload: str = Form(...)):
     value_dict = json.loads(value) if value else {}
 
     sku = value_dict.get("sku")
-    marca = value_dict.get("marca")
-    modelo = value_dict.get("modelo")
-    sucursal = value_dict.get("sucursal", "No especificada")
+    brand = value_dict.get("marca")
+    model = value_dict.get("modelo")
+    branch = value_dict.get("sucursal", "No especificada")
     channel_id = value_dict.get("channel_id")
     message_ts = value_dict.get("message_ts")
 
@@ -112,19 +108,18 @@ async def slack_interactivity(payload: str = Form(...)):
                 blocks=updated_blocks
             )
 
-            # Registrar en archivo
-            registrar_interaccion("aceptado", {
+            register_interaction("accepted", {
                 "sku": sku,
-                "marca": marca,
-                "modelo": modelo,
-                "sucursal": sucursal,
-                "usuario": user_display
+                "brand": brand,
+                "model": model,
+                "branch": branch,
+                "user": user_display
             })
 
         except Exception as e:
-            print(f"Error al actualizar mensaje: {e}")
+            print(f"Error updating Slack message: {e}")
 
-        respuesta = f":white_check_mark: ¡Oferta aceptada para SKU {sku} por {user_display}!"
+        response_text = f":white_check_mark: ¡Oferta aceptada para SKU {sku} por {user_display}!"
 
     elif action_id == "rechazar_oferta":
         try:
@@ -132,28 +127,28 @@ async def slack_interactivity(payload: str = Form(...)):
             updated_blocks = []
 
             img_url = None
-            descripcion = None
+            description = None
 
             for block in original_blocks:
                 if block.get("type") == "image" and block.get("image_url"):
                     img_url = block.get("image_url")
                 elif block.get("type") == "section" and "text" in block:
-                    texto = block["text"]["text"]
-                    lineas = texto.split("\n")
-                    desc_line = next((l.replace("*Descripción:*", "").strip() for l in lineas if "*Descripción:*" in l), "")
+                    text = block["text"]["text"]
+                    lines = text.split("\n")
+                    desc_line = next((l.replace("*Descripción:*", "").strip() for l in lines if "*Descripción:*" in l), "")
                     if desc_line:
-                        descripcion = desc_line
+                        description = desc_line
 
             updated_blocks.append({
                 "type": "section",
                 "text": {
                     "type": "mrkdwn",
-                    "text": f"*Prenda/SKU:* {sku}\n*Descripción:* {descripcion or ''}"
+                    "text": f"*Prenda/SKU:* {sku}\n*Descripción:* {description or ''}"
                 },
                 "accessory": {
                     "type": "image",
                     "image_url": img_url or "https://via.placeholder.com/48",
-                    "alt_text": f"Imagen de {marca} {modelo}"
+                    "alt_text": f"Imagen de {brand} {model}"
                 }
             })
 
@@ -174,25 +169,23 @@ async def slack_interactivity(payload: str = Form(...)):
                 blocks=updated_blocks
             )
 
-            # Registrar en archivo
-            registrar_interaccion("rechazado", {
+            register_interaction("rejected", {
                 "sku": sku,
-                "marca": marca,
-                "modelo": modelo,
-                "sucursal": sucursal,
-                "usuario": user_display
+                "brand": brand,
+                "model": model,
+                "branch": branch,
+                "user": user_display
             })
 
         except Exception as e:
-            print(f"Error al actualizar mensaje en rechazo: {e}")
+            print(f"Error updating rejection message: {e}")
 
-        respuesta = f":x: Oferta rechazada para SKU {sku} por {user_display}."
+        response_text = f":x: Oferta rechazada para SKU {sku} por {user_display}."
 
     else:
-        respuesta = "Acción no reconocida."
+        response_text = "Acción no reconocida."
 
-    return PlainTextResponse(respuesta)
-
+    return PlainTextResponse(response_text)
 
 @app.get("/")
 async def home():

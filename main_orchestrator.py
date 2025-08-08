@@ -2,14 +2,14 @@ import json
 import datetime
 import os
 import time
-from scraper_completo import scrape_store_for_families, agrupar_y_guardar_por_modelo
-from analizador_modelos import procesar_modelos
-from notificador_slack import notificar_gangas_encontradas
+from full_scraper import scrape_store_by_categories, group_and_save_by_model
+from model_analyzer import process_models
+from slack_notifier import notify_detected_bargains
 
 STORES_FILE = "stores.json"
-OUTPUT_JSON = "productos_agrupados_por_modelo.json"
-OUTPUT_FILTRADO = "productos_agrupados_filtrados.json"
-ANALISIS_JSON = "analisis_modelos.json"
+OUTPUT_JSON = "grouped_products_by_model.json"
+OUTPUT_FILTRADO = "filtered_grouped_products.json"
+ANALYSIS_JSON = "model_analysis.json"
 MIN_HOURS_BETWEEN_SCRAPES = 6  # horas
 
 def load_json_file(filename):
@@ -22,11 +22,7 @@ def load_json_file(filename):
         print(f"Error: Archivo {filename} no es un JSON válido. Detalles: {e}")
         return None
 
-def limpiar_modelos_por_minimo_dispositivos(
-    input_path=OUTPUT_JSON,
-    output_path=OUTPUT_FILTRADO,
-    minimo=5
-):
+def filter_models_by_min_devices(input_path=OUTPUT_JSON, output_path=OUTPUT_FILTRADO, minimo=5):
     if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
         print(f"El archivo {input_path} no existe o está vacío. No se puede limpiar modelos.")
         return
@@ -34,24 +30,22 @@ def limpiar_modelos_por_minimo_dispositivos(
     with open(input_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
-    filtrados = {
-        modelo: dispositivos
-        for modelo, dispositivos in data.items()
-        if len(dispositivos) >= minimo
+    filtered = {
+        model: items
+        for model, items in data.items()
+        if len(items) >= minimo
     }
 
     with open(output_path, 'w', encoding='utf-8') as f:
-        json.dump(filtrados, f, indent=2, ensure_ascii=False)
+        json.dump(filtered, f, indent=2, ensure_ascii=False)
 
     print(
-        f"Modelos filtrados: {len(filtrados)} de {len(data)} modelos originales. "
+        f"Modelos filtrados: {len(filtered)} de {len(data)} modelos originales. "
         f"(mínimo {minimo} dispositivos por modelo)"
     )
 
 def is_time_to_scrape(file_path, min_hours):
-    if not os.path.exists(file_path):
-        return True
-    if os.path.getsize(file_path) == 0:
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
         return True
     last_modified = os.path.getmtime(file_path)
     last_dt = datetime.datetime.fromtimestamp(last_modified)
@@ -89,7 +83,7 @@ def main_orchestrator():
             time.sleep(60 * 30)
             continue
 
-        familias = [
+        categories = [
             "CELULARES",
             "CONSOLAS DE JUEGOS",
             "AUDIFONOS",
@@ -106,22 +100,22 @@ def main_orchestrator():
         if is_time_to_scrape(OUTPUT_JSON, MIN_HOURS_BETWEEN_SCRAPES):
             print("🔍 Ejecutando scraping ahora...\n")
             all_scraped_products = []
-            for id_sucursal, nombre_sucursal in stores_data.items():
-                print(f"📍 Procesando tienda: {nombre_sucursal} (ID: {id_sucursal})")
-                scraped_data_from_store = scrape_store_for_families(id_sucursal, nombre_sucursal, familias)
-                all_scraped_products.extend(scraped_data_from_store)
+            for store_id, store_name in stores_data.items():
+                print(f"📍 Procesando tienda: {store_name} (ID: {store_id})")
+                scraped_data = scrape_store_by_categories(store_id, store_name, categories)
+                all_scraped_products.extend(scraped_data)
 
             print(f"\n--- ✅ Scraping completado. Total de productos: {len(all_scraped_products)} ---")
             if all_scraped_products:
-                agrupar_y_guardar_por_modelo(all_scraped_products, output_path=OUTPUT_JSON)
+                group_and_save_by_model(all_scraped_products, output_path=OUTPUT_JSON)
             else:
                 print("⚠ No se encontraron datos en ninguna tienda.")
         else:
             print("⏭ No se hará scraping en este ciclo. El archivo actual sigue vigente.")
 
-        limpiar_modelos_por_minimo_dispositivos(input_path=OUTPUT_JSON, output_path=OUTPUT_FILTRADO, minimo=5)
-        procesar_modelos(input_path=OUTPUT_FILTRADO, output_path=ANALISIS_JSON)
-        notificar_gangas_encontradas(ANALISIS_JSON)
+        filter_models_by_min_devices(input_path=OUTPUT_JSON, output_path=OUTPUT_FILTRADO, minimo=5)
+        process_models(input_path=OUTPUT_FILTRADO, output_path=ANALYSIS_JSON)
+        notify_detected_bargains(ANALYSIS_JSON)
 
         print("\n✅ Ciclo finalizado. Esperando 6 horas antes del siguiente...")
         time.sleep(60 * 60 * 6)
