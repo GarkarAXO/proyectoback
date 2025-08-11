@@ -2,9 +2,17 @@ import json
 import datetime
 import os
 import time
+import logging
 from full_scraper import scrape_store_by_categories, group_and_save_by_model
 from model_analyzer import process_models
 from slack_notifier import notify_detected_bargains
+
+# Configuración básica de logging
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
 
 STORES_FILE = "stores.json"
 OUTPUT_JSON = "grouped_products_by_model.json"
@@ -19,12 +27,12 @@ def load_json_file(filename):
     except FileNotFoundError:
         return None
     except json.JSONDecodeError as e:
-        print(f"Error: Archivo {filename} no es un JSON válido. Detalles: {e}")
+        logging.error(f"Archivo {filename} no es un JSON válido. Detalles: {e}")
         return None
 
 def filter_models_by_min_devices(input_path=OUTPUT_JSON, output_path=OUTPUT_FILTRADO, minimo=5):
     if not os.path.exists(input_path) or os.path.getsize(input_path) == 0:
-        print(f"El archivo {input_path} no existe o está vacío. No se puede limpiar modelos.")
+        logging.warning(f"El archivo {input_path} no existe o está vacío. No se puede limpiar modelos.")
         return
 
     with open(input_path, 'r', encoding='utf-8') as f:
@@ -39,7 +47,7 @@ def filter_models_by_min_devices(input_path=OUTPUT_JSON, output_path=OUTPUT_FILT
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(filtered, f, indent=2, ensure_ascii=False)
 
-    print(
+    logging.info(
         f"Modelos filtrados: {len(filtered)} de {len(data)} modelos originales. "
         f"(mínimo {minimo} dispositivos por modelo)"
     )
@@ -54,7 +62,7 @@ def is_time_to_scrape(file_path, min_hours):
     if elapsed_hours >= min_hours:
         return True
     else:
-        print(f"Último scraping fue hace {elapsed_hours:.2f} horas. No se hará scraping todavía.")
+        logging.debug(f"Último scraping fue hace {elapsed_hours:.2f} horas. No se hará scraping todavía.")
         return False
 
 def main_orchestrator():
@@ -71,15 +79,15 @@ def main_orchestrator():
                 next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0)
 
             wait_seconds = (next_run - now).total_seconds()
-            print(f"⏸ Fuera del horario permitido ({START_HOUR}:00 a {END_HOUR}:00). Hora actual: {now.strftime('%H:%M')}.")
-            print(f"   Durmiendo hasta las {START_HOUR}:00... ({wait_seconds//60:.0f} minutos)")
+            logging.info(f"⏸ Fuera del horario permitido ({START_HOUR}:00 a {END_HOUR}:00). Hora actual: {now.strftime('%H:%M')}.")
+            logging.info(f"   Durmiendo hasta las {START_HOUR}:00... ({wait_seconds//60:.0f} minutos)")
             time.sleep(wait_seconds)
             continue
 
-        print(f"\n⏱ Iniciando orquestador principal - {now.strftime('%Y-%m-%d %H:%M:%S')}")
+        logging.info(f"⏱ Iniciando orquestador principal - {now.strftime('%Y-%m-%d %H:%M:%S')}")
         stores_data = load_json_file(STORES_FILE)
         if stores_data is None:
-            print("⚠ No se pudo cargar el archivo de tiendas.")
+            logging.warning("⚠ No se pudo cargar el archivo de tiendas.")
             time.sleep(60 * 30)
             continue
 
@@ -98,26 +106,26 @@ def main_orchestrator():
         ]
 
         if is_time_to_scrape(OUTPUT_JSON, MIN_HOURS_BETWEEN_SCRAPES):
-            print("🔍 Ejecutando scraping ahora...\n")
+            logging.info("🔍 Ejecutando scraping ahora...")
             all_scraped_products = []
             for store_id, store_name in stores_data.items():
-                print(f"📍 Procesando tienda: {store_name} (ID: {store_id})")
+                logging.debug(f"📍 Procesando tienda: {store_name} (ID: {store_id})")
                 scraped_data = scrape_store_by_categories(store_id, store_name, categories)
                 all_scraped_products.extend(scraped_data)
 
-            print(f"\n--- ✅ Scraping completado. Total de productos: {len(all_scraped_products)} ---")
+            logging.info(f"--- ✅ Scraping completado. Total de productos: {len(all_scraped_products)} ---")
             if all_scraped_products:
                 group_and_save_by_model(all_scraped_products, output_path=OUTPUT_JSON)
             else:
-                print("⚠ No se encontraron datos en ninguna tienda.")
+                logging.warning("⚠ No se encontraron datos en ninguna tienda.")
         else:
-            print("⏭ No se hará scraping en este ciclo. El archivo actual sigue vigente.")
+            logging.debug("⏭ No se hará scraping en este ciclo. El archivo actual sigue vigente.")
 
         filter_models_by_min_devices(input_path=OUTPUT_JSON, output_path=OUTPUT_FILTRADO, minimo=5)
         process_models(input_path=OUTPUT_FILTRADO, output_path=ANALYSIS_JSON)
         notify_detected_bargains(ANALYSIS_JSON)
 
-        print("\n✅ Ciclo finalizado. Esperando 6 horas antes del siguiente...")
+        logging.info("✅ Ciclo finalizado. Esperando 6 horas antes del siguiente...")
         time.sleep(60 * 60 * 6)
 
 if __name__ == "__main__":
