@@ -1,7 +1,6 @@
 import os
 import json
 import time
-from datetime import date
 from dotenv import load_dotenv
 from full_scraper import get_images_by_sku
 from slack_sdk import WebClient
@@ -10,32 +9,7 @@ load_dotenv()
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 client = WebClient(token=SLACK_BOT_TOKEN)
 
-# Persistent file for branch history
-SENT_BRANCHES_FILE = "sent_branches.json"
-
-def load_sent_branches():
-    if os.path.exists(SENT_BRANCHES_FILE):
-        try:
-            with open(SENT_BRANCHES_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error cargando historial de sucursales: {e}")
-    return {"fecha": str(date.today()), "sucursales": []}
-
-def save_sent_branches(data):
-    try:
-        with open(SENT_BRANCHES_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=4)
-    except Exception as e:
-        print(f"Error guardando historial de sucursales: {e}")
-
-SENT_TODAY = load_sent_branches()
-
-if SENT_TODAY["fecha"] != str(date.today()):
-    SENT_TODAY = {"fecha": str(date.today()), "sucursales": []}
-    save_sent_branches(SENT_TODAY)
-
-# Load sorting config
+# Cargar configuración de ordenamiento para familias y sucursales
 try:
     with open("config_orden_envio.json", "r", encoding="utf-8") as f:
         send_order_config = json.load(f)
@@ -163,15 +137,19 @@ def send_slack_notification(payload_blocks):
         return None
 
 def notify_detected_bargains(path_analysis="model_analysis.json", model_products_path="grouped_products_by_model.json"):
-    global SENT_TODAY
+    try:
+        with open(model_products_path, "r", encoding="utf-8") as f:
+            model_products = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print(f"No se pudo leer o decodificar {model_products_path}. No hay nada que notificar.")
+        return
 
-    if SENT_TODAY["fecha"] != str(date.today()):
-        SENT_TODAY = {"fecha": str(date.today()), "sucursales": []}
-
-    with open(model_products_path, "r", encoding="utf-8") as f:
-        model_products = json.load(f)
-    with open(path_analysis, "r", encoding="utf-8") as f:
-        analysis = json.load(f)
+    try:
+        with open(path_analysis, "r", encoding="utf-8") as f:
+            analysis = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print(f"No se pudo leer o decodificar {path_analysis}. No hay nada que notificar.")
+        return
 
     items_to_send = []
     for model_key, info in analysis.items():
@@ -208,21 +186,17 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
                 "model_products": products
             })
 
+    # Ordenar todas las ofertas encontradas según la configuración
     items_to_send.sort(key=lambda x: sort_key(x["item"]))
 
-    allowed_branches = set(SENT_TODAY["sucursales"])
-    for i in items_to_send:
-        branch = i["item"]["Sucursal"]
-        if len(allowed_branches) >= 3:
-            break
-        allowed_branches.add(branch)
+    if not items_to_send:
+        print("No se encontraron ofertas para notificar en esta ejecución.")
+        return
 
-    filtered_items = [i for i in items_to_send if i["item"]["Sucursal"] in allowed_branches]
-    SENT_TODAY["sucursales"] = list(allowed_branches)
-    save_sent_branches(SENT_TODAY)
-
+    print(f"Se encontraron {len(items_to_send)} ofertas para notificar. Enviando una cada 3 minutos.")
+    
     sent_count = 0
-    for item in filtered_items:
+    for item in items_to_send:
         openai_msg = analyze_offer_with_openai(item["item"], item["model_products"])
         if not openai_msg.lower().startswith("sí") and not openai_msg.lower().startswith("si"):
             continue
@@ -252,7 +226,10 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
             print(f"Error al actualizar mensaje: {e}")
 
         sent_count += 1
-        print(f"Oferta enviada: {item['brand']} {item['model']} ({item['item']['Sucursal']}) - Esperando 3 minutos...")
-        time.sleep(180)
+        print(f"Notificación {sent_count}/{len(items_to_send)} enviada para: {item['brand']} {item['model']} en {item['item']['Sucursal']}")
 
-    print(f"Ofertas totales enviadas hoy ({SENT_TODAY['fecha']}): {sent_count} | Sucursales: {SENT_TODAY['sucursales']}")
+        if sent_count < len(items_to_send):
+            print("Esperando 3 minutos para la siguiente oferta...")
+            time.sleep(180)
+
+    print(f"Proceso de notificación finalizado. Se enviaron {sent_count} alertas.")
