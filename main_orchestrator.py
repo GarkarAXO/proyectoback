@@ -3,9 +3,7 @@ import datetime
 import os
 import time
 import logging
-from full_scraper import scrape_store_by_categories, group_and_save_by_model
-from model_analyzer import process_models
-from slack_notifier import notify_detected_bargains
+from slack_notifier import notify_detected_bargains, load_state
 
 # Configuración básica de logging
 logging.basicConfig(
@@ -60,7 +58,9 @@ def main_orchestrator():
 
     while True:
         now = datetime.datetime.now()
+        today_str = str(now.date())
 
+        # Handle sleeping outside of allowed hours
         if now.hour < START_HOUR or now.hour >= END_HOUR:
             if now.hour >= END_HOUR:
                 next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
@@ -70,6 +70,15 @@ def main_orchestrator():
             wait_seconds = (next_run - now).total_seconds()
             logging.info(f"⏸ Fuera del horario permitido ({START_HOUR}:00 a {END_HOUR}:00). Hora actual: {now.strftime('%H:%M')}.")
             logging.info(f"   Durmiendo hasta las {START_HOUR}:00... ({wait_seconds//60:.0f} minutos)")
+            time.sleep(wait_seconds)
+            continue
+
+        # Load state to check if notification cycle is complete for today
+        state = load_state()
+        if state.get("notification_completed_today", False) and state.get("last_notification_date") == today_str:
+            logging.info(f"✅ Notificaciones para hoy ({today_str}) ya enviadas. Durmiendo hasta mañana.")
+            next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+            wait_seconds = (next_run - now).total_seconds()
             time.sleep(wait_seconds)
             continue
 
@@ -111,7 +120,10 @@ def main_orchestrator():
         process_models(input_path=OUTPUT_FILTRADO, output_path=ANALYSIS_JSON)
         notify_detected_bargains(ANALYSIS_JSON)
 
-        logging.info("✅ Ciclo finalizado. El proximo ciclo comenzara en breve.")
+        logging.info("✅ Ciclo finalizado. Durmiendo hasta el inicio del próximo ciclo de notificaciones.")
+        next_run = now.replace(hour=START_HOUR, minute=0, second=0, microsecond=0) + datetime.timedelta(days=1)
+        wait_seconds = (next_run - now).total_seconds()
+        time.sleep(wait_seconds)
 
 if __name__ == "__main__":
     main_orchestrator()

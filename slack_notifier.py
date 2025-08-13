@@ -16,12 +16,19 @@ STATE_FILE = "store_queue_state.json"
 def load_state():
     if os.path.exists(STATE_FILE):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
+            state = json.load(open(STATE_FILE, "r", encoding="utf-8"))
+            # Ensure sent_skus_today is initialized
+            if "sent_skus_today" not in state:
+                state["sent_skus_today"] = []
+            # Ensure new fields are initialized
+            if "notification_completed_today" not in state:
+                state["notification_completed_today"] = False
+            if "last_notification_date" not in state:
+                state["last_notification_date"] = "1970-01-01"
+            return state
         except (json.JSONDecodeError, FileNotFoundError) as e:
             print(f"Error loading state file or file is empty, re-initializing. Error: {e}")
-    # Default initial state if file doesn't exist or is invalid
-    return {"current_start_index": -3, "last_update_date": "1970-01-01"}
+    return {"current_start_index": -3, "last_update_date": "1970-01-01", "sent_skus_today": [], "notification_completed_today": False, "last_notification_date": "1970-01-01"}
 
 def save_state(data):
     try:
@@ -59,7 +66,7 @@ def format_slack_blocks(brand, model, item, q1, q3,
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f":iphone: *¡Oferta detectada!*\n"
+                    f":iphone: *¡Oferta detectada!\n"
                     f"*Marca:* {brand}\n"
                     f"*Modelo:* {model}\n"
                     f"*Prenda/SKU:* {item['SKU']}\n"
@@ -163,15 +170,29 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
     
     current_index = state.get("current_start_index", -3)
     last_update = state.get("last_update_date", "1970-01-01")
+    
+    # New fields
+    notification_completed_today = state.get("notification_completed_today", False)
+    last_notification_date = state.get("last_notification_date", "1970-01-01")
 
     if today_str != last_update:
-        print(f"Nuevo día detectado. Avanzando índice de sucursales.")
+        print(f"Nuevo día detectado. Avanzando índice de sucursales y reiniciando SKUs enviados.")
         current_index = (current_index + 3)
         if current_index >= len(SORTED_BRANCHES_LIST):
             current_index = 0 # Reset to the beginning
         
-        state = {"current_start_index": current_index, "last_update_date": today_str}
+        state = {"current_start_index": current_index, "last_update_date": today_str, "sent_skus_today": [], "notification_completed_today": False, "last_notification_date": today_str}
         save_state(state)
+    else:
+        # Ensure sent_skus_today is loaded correctly for the current day
+        if "sent_skus_today" not in state:
+            state["sent_skus_today"] = []
+        # Ensure new fields are loaded correctly for the current day
+        if "notification_completed_today" not in state:
+            state["notification_completed_today"] = False
+        if "last_notification_date" not in state:
+            state["last_notification_date"] = today_str
+
 
     # Determine the 3 stores for today
     stores_for_today = []
@@ -242,6 +263,11 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
 
     sent_count = 0
     for item in filtered_items:
+        sku = item["item"]["SKU"]
+        if sku in state["sent_skus_today"]:
+            print(f"SKU {sku} ya enviado hoy. Saltando.")
+            continue
+
         openai_msg = analyze_offer_with_openai(item["item"], item["model_products"])
         if not openai_msg.lower().startswith("sí") and not openai_msg.lower().startswith("si"):
             continue
@@ -271,8 +297,15 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
             print(f"Error al actualizar mensaje: {e}")
 
         sent_count += 1
+        state["sent_skus_today"].append(sku) # Add SKU to sent list
+        save_state(state) # Save state after sending each item
         print(f"Oferta enviada: {item['brand']} {item['model']} ({item['item']['Sucursal']}) - Esperando 3 minutos...")
         time.sleep(180)
+
+    # At the end of the function, after all items have been processed
+    state["notification_completed_today"] = True
+    state["last_notification_date"] = today_str # Ensure this is updated
+    save_state(state)
 
     print(f"Ofertas totales enviadas hoy ({today_str}): {sent_count} | Sucursales procesadas: {stores_for_today}")
 
