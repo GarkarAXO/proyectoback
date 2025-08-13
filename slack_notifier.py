@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from datetime import date
 from dotenv import load_dotenv
 from full_scraper import get_images_by_sku
 from slack_sdk import WebClient
@@ -9,7 +10,27 @@ load_dotenv()
 SLACK_BOT_TOKEN = os.getenv("SLACK_BOT_TOKEN")
 client = WebClient(token=SLACK_BOT_TOKEN)
 
-# Cargar configuración de ordenamiento para familias y sucursales
+# State file for the rotating store queue
+STATE_FILE = "store_queue_state.json"
+
+def load_state():
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError) as e:
+            print(f"Error loading state file or file is empty, re-initializing. Error: {e}")
+    # Default initial state if file doesn't exist or is invalid
+    return {"current_start_index": -3, "last_update_date": "1970-01-01"}
+
+def save_state(data):
+    try:
+        with open(STATE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        print(f"Error saving state: {e}")
+
+# Load sorting config
 try:
     with open("config_orden_envio.json", "r", encoding="utf-8") as f:
         send_order_config = json.load(f)
@@ -137,18 +158,43 @@ def send_slack_notification(payload_blocks):
         return None
 
 def notify_detected_bargains(path_analysis="model_analysis.json", model_products_path="grouped_products_by_model.json"):
+    state = load_state()
+    today_str = str(date.today())
+    
+    current_index = state.get("current_start_index", -3)
+    last_update = state.get("last_update_date", "1970-01-01")
+
+    if today_str != last_update:
+        print(f"Nuevo día detectado. Avanzando índice de sucursales.")
+        current_index = (current_index + 3)
+        if current_index >= len(SORTED_BRANCHES_LIST):
+            current_index = 0 # Reset to the beginning
+        
+        state = {"current_start_index": current_index, "last_update_date": today_str}
+        save_state(state)
+
+    # Determine the 3 stores for today
+    stores_for_today = []
+    if not SORTED_BRANCHES_LIST:
+        print("Error: La lista de sucursales ordenadas está vacía.")
+        return
+
+    start_index = current_index
+    for i in range(3):
+        # Ensure the index wraps around correctly
+        idx = (start_index + i) % len(SORTED_BRANCHES_LIST)
+        stores_for_today.append(SORTED_BRANCHES_LIST[idx])
+    
+    print(f"Sucursales para procesar hoy ({today_str}): {stores_for_today}")
+
+    # Load product data
     try:
         with open(model_products_path, "r", encoding="utf-8") as f:
             model_products = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        print(f"No se pudo leer o decodificar {model_products_path}. No hay nada que notificar.")
-        return
-
-    try:
         with open(path_analysis, "r", encoding="utf-8") as f:
             analysis = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        print(f"No se pudo leer o decodificar {path_analysis}. No hay nada que notificar.")
+    except FileNotFoundError as e:
+        print(f"Error: No se encontró el archivo {e.filename}. Saltando ciclo de notificación.")
         return
 
     items_to_send = []
@@ -167,7 +213,7 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
         low_range_str = f"${min_price:,.0f} a ${q1:,.0f}"
         low_range_count = sum(min_price <= float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= q1 for p in products)
         dominant_count = sum(q1 <= float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= q3 for p in products)
-        max_price = max(float(p["Precio Promoción"].replace("$", "").replace(",", "")) for p in products)
+        max_price = max(float(p["Precio Promoción"].replace("$", "").replace(",", "")) for p in products) if products else 0
         high_range_str = f"${q3:,.0f} a ${max_price:,.0f}"
         high_range_count = sum(q3 < float(p["Precio Promoción"].replace("$", "").replace(",", "")) <= max_price for p in products)
 
@@ -186,17 +232,16 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
                 "model_products": products
             })
 
-    # Ordenar todas las ofertas encontradas según la configuración
-    items_to_send.sort(key=lambda x: sort_key(x["item"]))
-
-    if not items_to_send:
-        print("No se encontraron ofertas para notificar en esta ejecución.")
-        return
-
-    print(f"Se encontraron {len(items_to_send)} ofertas para notificar. Enviando una cada 3 minutos.")
+    # Filter items for today's stores
+    filtered_items = [i for i in items_to_send if i["item"]["Sucursal"] in stores_for_today]
     
+    # Sort the filtered items
+    filtered_items.sort(key=lambda x: sort_key(x["item"]))
+
+    print(f"Se van a enviar {len(filtered_items)} ofertas a Slack para las sucursales de hoy.")
+
     sent_count = 0
-    for item in items_to_send:
+    for item in filtered_items:
         openai_msg = analyze_offer_with_openai(item["item"], item["model_products"])
         if not openai_msg.lower().startswith("sí") and not openai_msg.lower().startswith("si"):
             continue
@@ -226,10 +271,11 @@ def notify_detected_bargains(path_analysis="model_analysis.json", model_products
             print(f"Error al actualizar mensaje: {e}")
 
         sent_count += 1
-        print(f"Notificación {sent_count}/{len(items_to_send)} enviada para: {item['brand']} {item['model']} en {item['item']['Sucursal']}")
+        print(f"Oferta enviada: {item['brand']} {item['model']} ({item['item']['Sucursal']}) - Esperando 3 minutos...")
+        time.sleep(180)
 
-        if sent_count < len(items_to_send):
-            print("Esperando 3 minutos para la siguiente oferta...")
-            time.sleep(180)
+    print(f"Ofertas totales enviadas hoy ({today_str}): {sent_count} | Sucursales procesadas: {stores_for_today}")
 
-    print(f"Proceso de notificación finalizado. Se enviaron {sent_count} alertas.")
+
+if __name__ == "__main__":
+    notify_detected_bargains()
