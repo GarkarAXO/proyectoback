@@ -66,7 +66,7 @@ def format_slack_blocks(brand, model, item, q1, q3,
             "text": {
                 "type": "mrkdwn",
                 "text": (
-                    f":iphone: *¡Oferta detectada!\n"
+                    f":iphone: *¡Oferta detectada!*\n"
                     f"*Marca:* {brand}\n"
                     f"*Modelo:* {model}\n"
                     f"*Prenda/SKU:* {item['SKU']}\n"

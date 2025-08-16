@@ -1,4 +1,8 @@
 {
-    "fecha": "2025-08-11",
-    "sucursales": []
+    "fecha": "2025-08-12",
+    "sucursales": [
+        "Tacubaya",
+        "Chilpancingo",
+        "San Cosme"
+    ]
 }

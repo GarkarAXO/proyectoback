@@ -4,6 +4,8 @@ import os
 import time
 import logging
 from slack_notifier import notify_detected_bargains, load_state
+from full_scraper import scrape_store_by_categories, group_and_save_by_model
+from model_analyzer import process_models
 
 # Configuración básica de logging
 logging.basicConfig(
